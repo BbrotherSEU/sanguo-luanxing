@@ -22,8 +22,6 @@ public class DayCycle
     /// <summary>是否跟随场景自动流逝</summary>
     public bool Auto = true;
 
-    float t;
-
     // 一天里的关键光照参数
     static readonly Color[] SkyKeys =
     {
@@ -41,9 +39,10 @@ public class DayCycle
     public void Update(float dt)
     {
         if (!Auto || DayLength <= 0f) return;
-        t += dt / Mathf.Max(1f, DayLength);
-        t %= 1f;
-        Time01 = t;
+        // 累加在 Time01 上，而不是另起一个从 0 起步的累加器。
+        // 另起累加器会把外部设好的 Time01（WorldBuilder 给了 0.30 = 上午）冲掉，
+        // 场景每次开局都从午夜 0 起步：太阳几乎没光，整个地面被压成近黑。
+        Time01 = Mathf.Repeat(Time01 + dt / Mathf.Max(1f, DayLength), 1f);
         Apply();
     }
 

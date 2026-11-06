@@ -100,8 +100,11 @@ public class PlayerCtrl
         anim = new FrameAnim(Body);
         // 只接同一套立绘的待机和走路。旧的攻击帧是另一个人，接进来会在出招时换脸。
         anim.Load("player", "idle", 2, 2.2f, true, Height);
-        anim.Load("player", "walk", 4, 6f, true, Height);
-        if (!anim.Has("walk")) anim.Load("player", "walk", 6, 8f, true, Height);
+        // 走路帧 4 帧一个循环（=2 步），步长约 1.2 世界单位。
+        // 按设计速度 6.4 算，脚不滑地需要 ~10.6 fps —— 6fps 会让脚迈得比地面慢，
+        // 走起来像贴地平移。
+        anim.Load("player", "walk", 4, 11f, true, Height);
+        if (!anim.Has("walk")) anim.Load("player", "walk", 6, 10f, true, Height);
 
         // 攻击帧：轻击 4 帧 @11fps，命中帧（第 2 帧）正好落在 Light[].Hit 的时刻。
         // 二/三段没有独立素材时借用一段：二段原速、三段放慢，撑满各自更长的挥砍时间。
@@ -554,7 +557,8 @@ public class PlayerCtrl
             float ph = anim.Phase01;
             // 一个步循环里身体起落两次（左右脚各一次）
             bob = -Mathf.Abs(Mathf.Sin(ph * Mathf.PI * 2f)) * 0.05f;
-            sway = Mathf.Sin(ph * Mathf.PI * 2f) * 0.04f;
+            // 只做上下起伏，不做左右平移：整体左右挪会让身体在两张腿之间荡，
+            // 看着像原地摇摆而不是在走路。
             lean = 0.07f;
             Body.transform.localRotation = Quaternion.identity;
 

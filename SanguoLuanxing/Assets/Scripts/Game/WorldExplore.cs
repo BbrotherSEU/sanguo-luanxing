@@ -40,6 +40,8 @@ public class WorldExplore
     float moveTime, breath;
     float speed = 6.2f;
     float height = 2.5f;
+    /// <summary>当前移动速度（世界单位/秒）。带加速插值，起步/停下不是瞬时的。</summary>
+    Vector3 vel;
 
     readonly List<WorldSpot> spots = new List<WorldSpot>();
     readonly List<WorldEvents.EvSpot> evSpots = new List<WorldEvents.EvSpot>();
@@ -156,7 +158,10 @@ public class WorldExplore
 
         anim = new FrameAnim(heroBody);
         anim.Load("player", "idle", 2, 2.5f, true, height);
-        anim.Load("player", "walk", 4, 6f, true, height);
+        // 走路帧是 4 帧一个循环（=2 步）。素材每帧迈一步，
+        // 要让脚跟上地面（不出现"平移滑步"），帧率得够快：
+        // 步长约 1.16 世界单位，一循环走 2.32 u，速度 6.2 u/s 时需要 ~10.7 fps。
+        anim.Load("player", "walk", 4, 11f, true, height);
         if (!anim.Has("walk")) anim.Load("player", "walk", 6, 10f, true, height);
     }
 
@@ -578,6 +583,13 @@ public class WorldExplore
 
         bool active = !G.StoryOpen && !G.Paused && !mapOpen;
         if (active) MoveHero(dt);
+        else
+        {
+            // 暂停/打开地图时不移动，速度也要清掉，
+            // 否则人物会在原地一直踏步（AnimateHero 按实际速度判定）。
+            vel = Vector3.zero;
+            moveTime = 0f;
+        }
 
         BillboardSpots();
         FindNear();
@@ -625,11 +637,26 @@ public class WorldExplore
         {
             mx /= len; mz /= len;
             aim = Mathf.Atan2(mz, mx);
-            Pos.x += mx * speed * dt;
-            Pos.z += mz * speed * dt;
-            moveTime += dt;
+            // 和战斗同样的加速插值：直接按速度改坐标会瞬时启停，
+            // 看着像贴地滑行，而不是迈腿走过去。
+            float k = Util.K(24f, dt);
+            vel.x += (mx * speed - vel.x) * k;
+            vel.z += (mz * speed - vel.z) * k;
         }
+        else
+        {
+            // 松键后快速减速停住，但不要急停。
+            float dec = Mathf.Pow(0.00002f, dt);
+            vel.x *= dec; vel.z *= dec;
+        }
+
+        // moveTime 表示"移动时长"，跟实际速度走（松键后滑行减速的那段也算），
+        // 供程序化摆动用。
+        if (vel.magnitude > 0.05f) moveTime += dt;
         else moveTime = 0f;
+
+        Pos.x += vel.x * dt;
+        Pos.z += vel.z * dt;
 
         Pos.x = Mathf.Clamp(Pos.x, -WalkBound, WalkBound);
         Pos.z = Mathf.Clamp(Pos.z, -WalkBound, WalkBound);
@@ -639,10 +666,17 @@ public class WorldExplore
 
     void AnimateHero(float dt)
     {
-        bool moving = moveTime > 0f;
+        // 用实际速度判断"在不在走"，而不是按键是否按住：
+        // 松键后人物还在滑行减速的那一小段，脚应该继续迈。
+        float spd = vel.magnitude;
+        bool moving = spd > 0.35f;
         if (anim != null && anim.Any)
         {
             anim.Play(moving ? "walk" : "idle");
+            // 步频跟着实际速度走：跑得快脚就迈得勤，否则会出现"平移滑步"。
+            // 基准是野外设计速度 speed。
+            if (anim.Has("walk"))
+                anim.SetRate("walk", Mathf.Clamp(spd / speed, 0.45f, 1.9f));
             anim.Update(dt);
         }
 
@@ -650,7 +684,10 @@ public class WorldExplore
         {
             // 走路帧朝左。有迈步动画时不再把整个人压扁，腿才看得清。
             bool stepping = moving && anim != null && anim.Has("walk");
-            heroBody.flipX = Mathf.Cos(aim) > 0.05f;
+            // 朝向判定要留死区：正上/正下走时 cos(aim) 就在 0 附近，
+            // 阈值卡在 0 会让整个人在左右两个方向之间反复翻转（看着像左右摇摆）。
+            // 用 0.15 的死区，只有明显偏向左右时才换朝向。
+            heroBody.flipX = Mathf.Cos(aim) > 0.15f;
             float wob = stepping ? 1f : 1f + Mathf.Sin(moving ? moveTime * 12f : breath * 2f) * 0.02f;
             heroBody.transform.localScale = new Vector3(wob, wob, 1f);
             heroBody.sortingOrder = Util.SortOrder(Pos.z, 20);
@@ -659,9 +696,11 @@ public class WorldExplore
             {
                 // 和战斗里一样：帧动画管腿，身体的重心起伏由程序化叠加，
                 // 相位跟着帧动画走，脚步才不会和身体各摆各的。
+                // 只做上下起伏，不做左右平移 —— 左右挪会让整个人在两张腿之间荡，
+                // 看着像原地摇摆而不是走路。
                 float ph = anim.Phase01;
                 float bob = -Mathf.Abs(Mathf.Sin(ph * Mathf.PI * 2f)) * 0.05f;
-                heroBody.transform.localPosition = new Vector3(Mathf.Sin(ph * Mathf.PI * 2f) * 0.04f, bob, 0f);
+                heroBody.transform.localPosition = new Vector3(0f, bob, 0f);
             }
             else
             {
