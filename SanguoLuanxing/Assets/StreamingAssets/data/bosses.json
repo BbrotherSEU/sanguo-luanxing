@@ -1,0 +1,51 @@
+[
+  {
+    "Id": "cheng", "Name": "黄巾渠帅 · 程远志", "Sprite": "boss_cheng",
+    "Title": "苍天已死", "Boss": true, "Type": "melee",
+    "Hp": 430, "Atk": 18, "Def": 8, "Speed": 2.1, "Scale": 1.5,
+    "Exp": 190, "Gold": 120, "Poise": 1.4, "Aggro": 14,
+    "Patterns": ["cleave", "slam"]
+  },
+  {
+    "Id": "huaxiong", "Name": "西凉猛将 · 华雄", "Sprite": "boss_huaxiong",
+    "Title": "关外无人可敌", "Boss": true, "Type": "melee",
+    "Hp": 760, "Atk": 25, "Def": 15, "Speed": 2.3, "Scale": 1.55,
+    "Exp": 320, "Gold": 200, "Poise": 1.8, "Aggro": 14,
+    "Patterns": ["cleave", "slam", "charge"]
+  },
+  {
+    "Id": "zhanghe", "Name": "魏之名将 · 张郃", "Sprite": "boss_zhanghe",
+    "Title": "巧变之将", "Boss": true, "Type": "melee",
+    "Hp": 1080, "Atk": 31, "Def": 19, "Speed": 2.7, "Scale": 1.55,
+    "Exp": 480, "Gold": 300, "Poise": 2.0, "Aggro": 15,
+    "Patterns": ["cleave", "charge", "slam"]
+  },
+  {
+    "Id": "lvbu", "Name": "天下无双 · 吕布", "Sprite": "boss_lvbu",
+    "Title": "人中吕布", "Boss": true, "Type": "melee",
+    "Hp": 1600, "Atk": 41, "Def": 25, "Speed": 3.1, "Scale": 1.7,
+    "Exp": 800, "Gold": 500, "Poise": 2.6, "Aggro": 16,
+    "Patterns": ["cleave", "charge", "slam"]
+  },
+  {
+    "Id": "dongzhuo", "Name": "太师 · 董卓", "Sprite": "boss_dongzhuo",
+    "Title": "凉州暴虐", "Boss": true, "Type": "melee",
+    "Hp": 2050, "Atk": 48, "Def": 29, "Speed": 2.9, "Scale": 1.7,
+    "Exp": 1050, "Gold": 640, "Poise": 2.8, "Aggro": 16,
+    "Patterns": ["cleave", "slam", "charge"]
+  },
+  {
+    "Id": "yuanshao", "Name": "四世三公 · 袁绍", "Sprite": "boss_yuanshao",
+    "Title": "官渡对敌", "Boss": true, "Type": "melee",
+    "Hp": 2650, "Atk": 56, "Def": 34, "Speed": 3.0, "Scale": 1.75,
+    "Exp": 1400, "Gold": 850, "Poise": 3.1, "Aggro": 17,
+    "Patterns": ["cleave", "charge", "slam"]
+  },
+  {
+    "Id": "machao", "Name": "西凉锦马超", "Sprite": "boss_machao",
+    "Title": "神威天将军", "Boss": true, "Type": "melee",
+    "Hp": 3400, "Atk": 63, "Def": 40, "Speed": 3.2, "Scale": 1.8,
+    "Exp": 2000, "Gold": 1200, "Poise": 3.5, "Aggro": 18,
+    "Patterns": ["cleave", "charge", "slam"]
+  }
+]

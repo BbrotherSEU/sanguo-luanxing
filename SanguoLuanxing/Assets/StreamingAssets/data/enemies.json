@@ -1,0 +1,27 @@
+[
+  {
+    "Id": "bandit", "Name": "黄巾乱兵", "Sprite": "bandit", "Type": "melee",
+    "Hp": 52, "Atk": 9, "Def": 2, "Speed": 2.3, "Scale": 1,
+    "Range": 1.9, "Windup": 0.42, "Recover": 0.32, "Cd": 0.95, "Aggro": 9,
+    "Exp": 16, "Gold": 9, "Poise": 0.45
+  },
+  {
+    "Id": "archer", "Name": "黄巾弓手", "Sprite": "archer", "Type": "ranged",
+    "Hp": 40, "Atk": 10, "Def": 1, "Speed": 2.4, "Scale": 1,
+    "Range": 11, "KeepMin": 5.5, "KeepMax": 9,
+    "Windup": 0.55, "Recover": 0.38, "Cd": 1.55, "Aggro": 12,
+    "Exp": 18, "Gold": 10, "Poise": 0.4, "ArrowSpeed": 11
+  },
+  {
+    "Id": "brute", "Name": "重甲刀盾兵", "Sprite": "brute", "Type": "melee",
+    "Hp": 135, "Atk": 16, "Def": 11, "Speed": 1.7, "Scale": 1.12,
+    "Range": 2.1, "Windup": 0.65, "Recover": 0.42, "Cd": 1.15, "Aggro": 9,
+    "Exp": 34, "Gold": 22, "Poise": 0.85
+  },
+  {
+    "Id": "rider", "Name": "并州铁骑", "Sprite": "brute", "Type": "melee",
+    "Hp": 175, "Atk": 20, "Def": 14, "Speed": 3.0, "Scale": 1.16,
+    "Range": 2.2, "Windup": 0.5, "Recover": 0.38, "Cd": 0.95, "Aggro": 11,
+    "Exp": 46, "Gold": 30, "Poise": 0.95
+  }
+]

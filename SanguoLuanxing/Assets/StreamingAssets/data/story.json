@@ -1,0 +1,54 @@
+{
+  "_说明": "剧情覆盖表。Scenes 里出现的段落 id 会替换代码里的内置台词；没出现的段落照常用内置的。删掉本文件即可全部回退到内置剧情。",
+  "_可用段落id": [
+    "Q1_World", "T1_Intro", "T1_BossIntro", "T1_Outro",
+    "T2_Intro", "T2_BossIntro", "T2_Outro",
+    "T3_Intro", "T3_BossIntro", "T3_Outro",
+    "T4_Intro", "T4_BossIntro", "T4_Outro",
+    "PeachSuwan", "PeachAfu", "PassScout", "PassWine",
+    "ChangbanRefugee", "ChangbanBridge", "HulaoGuard", "HulaoVeteran",
+    "JiangxiaFisher", "JiangxiaWeaver", "GuanduPost", "GuanduHerder",
+    "GuanduBarkeep", "GuanduVeteran",
+    "T5_Intro", "T5_BossIntro", "T5_Outro",
+    "LuoyangScribe", "LuoyangRefugee",
+    "T6_Intro", "T6_BossIntro", "T6_Outro",
+    "T7_Intro", "T7_BossIntro", "T7_Outro",
+    "WeiheLiangjiang", "WeiheShusheng", "WeiheChuanfu", "WeiheLaochuanfu",
+    "WeihePost", "WeiheHerder"
+  ],
+  "_立绘路径": "相对 assets/ 的路径，例如 npc/liu_bei.jpg；留空表示旁白",
+  "_旗号": "Choices 里的 Flag 会写进存档（flagsCsv），同维度的互斥，后选顶掉先选。可用旗号见 Assets/Scripts/Game/Flags.cs。",
+  "_结构": "Lines 是一段台词；Choices 是选项；Follow 是选中后接上的台词（Follow 里的行不能再带选项）",
+  "Scenes": [
+    {
+      "Id": "T1_Intro",
+      "Lines": [
+        { "Who": "", "Text": "建宁年间，天下大旱，饿殍遍野。一句「苍天已死，黄天当立」，点燃了整片中原。" },
+        { "Who": "", "Text": "你从一阵剧烈的头痛中醒来，身上是粗布短褐，手里攥着一柄不知从何而来的兵刃。" },
+        {
+          "Who": "刘备",
+          "Text": "这位壮士，涿郡城外黄巾四起，你若无处可去，可随我等一同护住这方百姓。",
+          "Img": "npc/liu_bei.jpg",
+          "Choices": [
+            {
+              "Text": "愿随刘公，护这一方百姓。",
+              "Flag": "swore",
+              "Follow": [
+                { "Who": "刘备", "Text": "好。桃园之中，我与关、张二弟已立誓同生共死。今日起，你也算我帐下一员。", "Img": "npc/liu_bei.jpg" },
+                { "Who": "", "Text": "风过桃林，花瓣落在你肩上。远处隐隐有杀声。" }
+              ]
+            },
+            {
+              "Text": "容我先在这桃林走一走。",
+              "Flag": "wander",
+              "Follow": [
+                { "Who": "刘备", "Text": "也好。乱世里，先看清脚下的路，才走得远。", "Img": "npc/liu_bei.jpg" },
+                { "Who": "刘备", "Text": "若你愿伸手，便去帮百姓收一收散落的粮草。", "Img": "npc/liu_bei.jpg" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

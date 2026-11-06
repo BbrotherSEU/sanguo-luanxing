@@ -1,0 +1,14 @@
+[
+  {
+    "Id": "charge", "Key": "Q", "Name": "破军突刺", "Desc": "向前突进，刺穿沿途之敌",
+    "BaseCd": 5.5, "BaseCost": 22, "BaseDmg": 1.85
+  },
+  {
+    "Id": "whirl", "Key": "E", "Name": "横扫千军", "Desc": "环身横扫，击退周围敌军",
+    "BaseCd": 8.5, "BaseCost": 30, "BaseDmg": 1.4, "Radius": 3.6
+  },
+  {
+    "Id": "warlord", "Key": "R", "Name": "武神降临", "Desc": "九息之内，攻击与身法大幅提升",
+    "BaseCd": 26, "BaseCost": 45, "BaseDmg": 0, "Duration": 9
+  }
+]

@@ -1,0 +1,65 @@
+# Unity 生成目录
+[Ll]ibrary/
+[Tt]emp/
+[Oo]bj/
+[Bb]uild/
+[Bb]uilds/
+[Ll]ogs/
+[Uu]serSettings/
+[Mm]emoryCaptures/
+[Rr]ecordings/
+
+# Unity 解决方案 / 工程文件
+*.csproj
+*.unityproj
+*.sln
+*.suo
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+*.apk
+*.aab
+*.unitypackage
+*.app
+
+# 编译产物
+*.apk
+*.aab
+*.ipa
+
+# 崩溃 / 日志
+sysinfo.txt
+crashlytics-build.properties
+*.stackdump
+
+# 我自己调试用的临时产物（_ 开头）
+_*.png
+_*.jpg
+_*.log
+
+# 备份 / 旧版素材（代码里已无引用）
+*.bak
+*.bak.meta
+*_prev.png
+*_prev.png.meta
+anim_legacy_bak/
+anim_legacy_bak.meta
+backup_assets/
+
+# 编辑器 / 系统垃圾
+.vs/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Python 生成脚本的临时产物
+__pycache__/
+*.pyc
