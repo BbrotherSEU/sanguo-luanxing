@@ -180,6 +180,11 @@ public class WorldBuilder
         };
         if (Settings.Current != null && Settings.Current.DayPhase >= 0f)
             cycle.Time01 = Settings.Current.DayPhase;
+        // 登记吃环境光的材质：地面/路面/山石/建筑。
+        // 天空与云不加（它们已由 tint 染过一遍，再叠会二次染色）。
+        cycle.AmbMats = new List<Material>();
+        foreach (var m in new[] { grassMat, pathMat, cliffMat, rockMat, archMat, toon, toonOut })
+            if (m != null) cycle.AmbMats.Add(m);
         cycle.Apply();
 
         RenderSettings.fog = true;
@@ -219,6 +224,9 @@ public class WorldBuilder
         }
         // 天空单独一份材质：昼夜循环靠它的 _Color 染色，不影响共享的地面材质
         skyMat = new Material(toon);
+        // 天空不与环境光叠加：它已经由 DayCycle 用 tint 按时段染过一遍，
+        // 再吃一份环境光会变成二次染色，天空发灰发脏。
+        SetAmb(skyMat, 0f);
         Emit("sky", kit.Build("sky", false), skyMat, false);
         if (cycle != null) cycle.SkyMat = skyMat;
 
@@ -240,6 +248,8 @@ public class WorldBuilder
             var mesh = kit.Build("cloud" + i, false);
             // 云单独一份材质：昼夜循环按时段染暖色
             var cm = new Material(toon);
+            // 云同天空：不叠环境光，避免被二次染色
+            SetAmb(cm, 0f);
             var tr = Emit("cloud" + i, mesh, cm, false).transform;
             cloudMats.Add(cm);
             clouds.Add(tr);
@@ -309,6 +319,20 @@ public class WorldBuilder
         // _TexTile 0.34 ≈ 3 米一铺：夯土层理、露砖斑块在这个尺度下才像"墙"，
         // 而不是一堆挤在一起的小格子。
         archMat = Look.NewArch(Theme, ow, wall, wood, roof, stone, 0.85f, 0.34f);
+
+        // 环境光权重：地面占画面最大，环境光给足才不会在背光面发死。
+        // 石头/建筑略低（本来就该硬朗一点），路面中等。
+        SetAmb(grassMat, 1.00f);
+        SetAmb(pathMat, 0.90f);
+        SetAmb(cliffMat, 0.95f);
+        SetAmb(rockMat, 0.80f);
+        SetAmb(archMat, 0.75f);
+    }
+
+    /// <summary>设置材质的方向性环境光权重（着色器 _AmbStrength）。</summary>
+    void SetAmb(Material m, float v)
+    {
+        if (m != null && m.HasProperty("_AmbStrength")) m.SetFloat("_AmbStrength", v);
     }
 
     void Terrain()

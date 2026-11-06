@@ -193,6 +193,9 @@ public static class Look
         if (t != null && m.HasProperty("_ShadowTint")) m.SetColor("_ShadowTint", t.ShadowTint);
         if (outline && m.HasProperty("_OutlineWidth")) m.SetFloat("_OutlineWidth", outlineWidth);
         if (outline && m.HasProperty("_OutlineColor")) m.SetColor("_OutlineColor", new Color(0.30f, 0.22f, 0.20f));
+        // 环境光权重：阴面吃天光才不会死黑。0.85 是通用值，
+        // 地面/建筑另外调（见 WorldBuilder.PaintMaterials）。
+        if (m.HasProperty("_AmbStrength")) m.SetFloat("_AmbStrength", 0.85f);
         return m;
     }
 

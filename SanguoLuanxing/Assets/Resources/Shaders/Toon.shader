@@ -33,6 +33,10 @@ Shader "Sanguo/Toon"
         _MeanMain ("Main Mean RGB", Color) = (0.5,0.5,0.5,1)
         _MeanDetail ("Detail Mean RGB", Color) = (0.5,0.5,0.5,1)
         _DetailContrast ("Detail Contrast", Float) = 1
+        _AmbStrength ("Ambient Strength", Range(0,2)) = 1
+        _AmbSky ("Ambient Sky", Color) = (0.55,0.60,0.68,1)
+        _AmbEq ("Ambient Equator", Color) = (0.45,0.45,0.48,1)
+        _AmbGnd ("Ambient Ground", Color) = (0.30,0.28,0.34,1)
     }
     SubShader
     {
@@ -60,6 +64,8 @@ Shader "Sanguo/Toon"
             float _LumRoof, _LumWood, _LumStone, _LumWall, _LumMain;
             float4 _MeanMain, _MeanDetail;
             float _DetailContrast;
+            float _AmbStrength;
+            float4 _AmbSky, _AmbEq, _AmbGnd;
             sampler2D _MainTex, _Path, _Wood, _Roof, _Stone, _DetailTex;
 
             float3 SampleTri(sampler2D tex, float3 wp, float3 nrm, float s)
@@ -169,6 +175,23 @@ Shader "Sanguo/Toon"
                 return ApplyDetail(painted, wp, nrm);
             }
 
+            // 方向性环境光。
+            // 三色由 DayCycle 每帧算好后写进材质（_AmbSky/_AmbEq/_AmbGnd），
+            // 不走引擎的 ambient 全局量 —— 那样行为依赖引擎内部实现，
+            // 自己传最稳，而且能随主题随时调。
+            // 值已经是显示空间（Gamma）颜色，直接用即可，不要再做 Gamma 转换。
+            float3 AmbientAt(float3 n)
+            {
+                float3 sky = _AmbSky.rgb;
+                float3 eq = _AmbEq.rgb;
+                float3 gnd = _AmbGnd.rgb;
+                float t = saturate(n.y * 0.5 + 0.5);
+                // 上半：赤道 → 天顶；下半：地面 → 赤道
+                return t > 0.5
+                    ? lerp(eq, sky, (t - 0.5) * 2.0)
+                    : lerp(gnd, eq, t * 2.0);
+            }
+
             struct appdata
             {
                 float4 vertex : POSITION;
@@ -233,13 +256,26 @@ Shader "Sanguo/Toon"
                 float3 baseCol = Paint(i.col.rgb, i.wp, n);
                 float luma = dot(baseCol, float3(0.30, 0.50, 0.20));
                 baseCol = saturate(lerp(float3(luma, luma, luma), baseCol, 1.05));
-                float3 litCol = baseCol * _LightColor0.rgb;
-                float3 shdCol = baseCol * _ShadowTint.rgb;
+
+                // 方向性环境光：按法线朝向往「地面色 ↔ 赤道色 ↔ 天顶色」之间取。
+                // 场景在 DayCycle 里设了 Trilight 三色环境光，之前这层光完全没进画面，
+                // 阴面只剩一层固定的 ShadowTint，画面是平的。
+                // 朝上的面吃天顶冷光、朝下的面吃地面暖反光，侧面接赤道色。
+                //
+                // 环境光主要补暗部：受光面本来就已经接近饱和，再叠会过曝发白。
+                // 所以亮面只加一点点（把环境光"挤"进亮暗交界），暗面加得多。
+                float3 amb = AmbientAt(n);
+                float3 litCol = baseCol * (_LightColor0.rgb + amb * _AmbStrength * 0.15f);
+                float3 shdCol = baseCol * (_ShadowTint.rgb + amb * _AmbStrength * 0.55f);
                 float3 c = lerp(shdCol, litCol, lit);
                 c += baseCol * hi * 0.10;
 
                 float rim = pow(saturate(1 - dot(n, vd)), 4) * _RimColor.a;
                 c += _RimColor.rgb * rim * (0.45 + 0.7 * lit);
+
+                // 环境光叠加后可能超过 1（正午 + 亮草地），
+                // 做个软压缩保住高光层次，不让画面糊成一片白。
+                c = c / (1.0 + max(0.0, max(c.r, max(c.g, c.b)) - 1.0));
 
                 fixed4 col = fixed4(c, 1);
                 UNITY_APPLY_FOG(i.fogCoord, col);

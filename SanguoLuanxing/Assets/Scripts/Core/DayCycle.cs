@@ -14,6 +14,11 @@ public class DayCycle
     public Material SkyMat;
     /// <summary>云朵网格的材质列表：跟着时段染暖色</summary>
     public List<Material> CloudMats;
+    /// <summary>
+    /// 需要吃方向性环境光的材质（地面/建筑/石头等）。
+    /// 天空与云不加入：它们已经由 tint 按时段染过一遍，再叠环境光会二次染色。
+    /// </summary>
+    public List<Material> AmbMats;
 
     /// <summary>当前一天进度：0=午夜 0.25=日出 0.5=正午 0.75=日落</summary>
     public float Time01 = 0.32f;
@@ -70,9 +75,27 @@ public class DayCycle
 
         // 环境光：天顶取天空色，地面取阴影色
         RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Trilight;
-        RenderSettings.ambientSkyColor = Color.Lerp(sky, Color.white, 0.18f);
-        RenderSettings.ambientEquatorColor = Color.Lerp(fog, Theme != null ? Theme.GrassA : Color.gray, 0.30f) * 0.82f;
-        RenderSettings.ambientGroundColor = (Theme != null ? Theme.ShadowTint : new Color(0.4f, 0.4f, 0.6f)) * 0.50f;
+        Color ambSky = Color.Lerp(sky, Color.white, 0.18f);
+        Color ambEq = Color.Lerp(fog, Theme != null ? Theme.GrassA : Color.gray, 0.30f) * 0.82f;
+        Color ambGnd = (Theme != null ? Theme.ShadowTint : new Color(0.4f, 0.4f, 0.6f)) * 0.50f;
+        RenderSettings.ambientSkyColor = ambSky;
+        RenderSettings.ambientEquatorColor = ambEq;
+        RenderSettings.ambientGroundColor = ambGnd;
+
+        // 同样的三色写进材质：Toon 着色器不读引擎的 ambient 全局量
+        // （内置管线走球谐，跟我们算的 Trilight 三色不是一个东西），
+        // 自己传最稳，也方便按材质微调。
+        if (AmbMats != null)
+        {
+            for (int i = 0; i < AmbMats.Count; i++)
+            {
+                var m = AmbMats[i];
+                if (m == null) continue;
+                if (m.HasProperty("_AmbSky")) m.SetColor("_AmbSky", ambSky);
+                if (m.HasProperty("_AmbEq")) m.SetColor("_AmbEq", ambEq);
+                if (m.HasProperty("_AmbGnd")) m.SetColor("_AmbGnd", ambGnd);
+            }
+        }
 
         RenderSettings.fogColor = fog;
         if (Cam != null) Cam.backgroundColor = sky;
