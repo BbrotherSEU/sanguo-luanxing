@@ -682,11 +682,14 @@ public class WorldExplore
 
         if (heroBody != null)
         {
-            // 走路帧朝左。有迈步动画时不再把整个人压扁，腿才看得清。
+            // 有迈步动画时不再把整个人压扁，腿才看得清。
             bool stepping = moving && anim != null && anim.Has("walk");
-            // 朝向判定要留死区：正上/正下走时 cos(aim) 就在 0 附近，
+            // 朝向：所有立绘素材（player.jpg / idle / walk）原生都朝右，
+            // 朝屏幕左才需要 flipX 翻转。
+            // 相机在 +z 看向 -z，所以屏幕左 = 世界 +x = aim 的 0 度方向，
+            // 即 Cos(aim) 越正越偏屏幕左。
+            // 留 0.15 死区：正上/正下走时 Cos 就在 0 附近，
             // 阈值卡在 0 会让整个人在左右两个方向之间反复翻转（看着像左右摇摆）。
-            // 用 0.15 的死区，只有明显偏向左右时才换朝向。
             heroBody.flipX = Mathf.Cos(aim) > 0.15f;
             float wob = stepping ? 1f : 1f + Mathf.Sin(moving ? moveTime * 12f : breath * 2f) * 0.02f;
             heroBody.transform.localScale = new Vector3(wob, wob, 1f);

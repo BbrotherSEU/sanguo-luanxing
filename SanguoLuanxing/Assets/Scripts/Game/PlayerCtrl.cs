@@ -583,8 +583,9 @@ public class PlayerCtrl
             Body.transform.localRotation = Quaternion.identity;
         }
 
+        // 朝屏幕右（世界 -x）。所有立绘素材原生都朝右，朝左才需要 flipX 翻转。
         bool faceLeft = Mathf.Cos(Aim) < -0.15f;
-        // 新的待机立绘朝左；没有立绘时仍按旧的程序化朝向
+        // 没有立绘时仍按旧的程序化朝向
         if (!(anim != null && anim.Any && want != null && anim.Has(want)))
             Body.flipX = (anim != null && anim.Has("idle")) ? Mathf.Cos(Aim) > 0.15f : faceLeft;
         Body.transform.localScale = new Vector3(1f, stretch, 1f);
