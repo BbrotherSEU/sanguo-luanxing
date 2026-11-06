@@ -43,6 +43,10 @@ public class Arena
         if (world != null) world.SetAmbience(autoCycle, phase01);
     }
 
+    /// <summary>该点的地面高度。角色要贴着地面走，否则有起伏的地形上会陷进去或悬空。</summary>
+    public float GroundHeight(float x, float z)
+        => world != null ? world.GroundHeight(x, z) : 0f;
+
     public void Resolve(ref Vector3 pos, float radius, Vector3? home = null)
     {
         float b = PlayBound > 1f ? PlayBound : Bound;

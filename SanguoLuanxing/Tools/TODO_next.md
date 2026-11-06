@@ -53,20 +53,42 @@ Grass → PathDressing → Architecture → Landmarks → Scenes → Ambient。
 
 ## 优化项（按「改动成本 / 视觉收益」排序，逐条独立可验收）
 
-### A1 ★★★ 环境光接入 Toon 着色器（最低成本、最高收益）
+### A1 ★★★ 环境光接入 Toon 着色器（最低成本、最高收益） ✅ 已完成 commit `6cc80cc`
+
 **问题**：`Toon.shader` **完全没有 ambient 采样**（全文件搜 `ambient|unity_` 只命中 `_ShadowTint`），
-暗部只做 `baseCol * _ShadowTint`（:237）。
+暗部只做 `baseCol * _ShadowTint`。
 而 `DayCycle.cs:72-75` 已经把天顶/赤道/地面三色写进了 `RenderSettings`
 （`ambientMode = Trilight`，ambientSky/Equator/GroundColor）—— **这些光一行都没进画面**。
-**改法**：
-- 在 `Toon.shader` 的 `CGPROGRAM` 里声明并采样 Unity 的三色环境光
-  （Trilight 模式下 Unity 提供的 `unity_AmbientSky` / `unity_AmbientEquator` / `unity_AmbientGround`）
-- 按法线 `nrm.y` 在「地面色 ↔ 赤道色 ↔ 天顶色」之间插值，得到一个方向性环境光
-- 加到 `shdCol` 与 `litCol` 上（暗部加得多、亮部加得少），再用 `_ShadowTint` 做艺术化偏移
-- 注意：`_PaintMode` 的 0/1/2/3 四条路径都要覆盖，别只改一条
-**收益**：一次改动，全场景从"平涂"变"有天光层次"（阴面带天顶冷光、地面暖反光），
-这是卡通渲染最有效的单点提升。
-**验收**：背光面不再是纯 `顶点色×ShadowTint`，而带方向性天光。
+
+**最终实现（与最初设想不同，记录原因）**：
+- 改成**由 C# 显式传值**到材质（`_AmbSky`/`_AmbEq`/`_AmbGnd`），
+  **不走**引擎的 `unity_AmbientSky/Equator/Ground` 全局量，也不用 `ShadeSH9`。
+  原因：内置管线的 ambient 走**球谐**（`unity_SH*`），与 Trilight 三色不是一回事，
+  且 `ShadeSH9` 内部会做 `LinearToGammaSpace`，与三色 uniform 的色彩空间不同，混用会色偏。
+- `Toon.shader` 新增 `AmbientAt(float3 n)`：按法线朝往在
+  地面色 ↔ 赤道色 ↔ 天顶色之间插值。朝上的面吃天顶冷光，朝下的面吃地面暖反光。
+- 环境光**主要补暗部**：受光面本来已接近饱和，再叠会过曝。
+  亮面系数 0.15 / 暗面 0.55，末尾加软压缩 `c / (1 + max(0, max(c)-1))` 保住高光层次。
+- 天空与云**不叠**环境光（`_AmbStrength = 0`）：它们已由 DayCycle 用 tint 染过一遍，
+  再叠会二次染色发灰。
+- 按材质角色分配 `_AmbStrength`：地面 1.0 / 路面 0.9 / 山石 0.95 / 石头 0.8 / 建筑 0.75。
+
+**实测效果（上午 11 点）**：
+| 部位 | 改前 | 改后 | 变化 |
+|---|---|---|---|
+| 草地受光 | 0.680, 0.900, 0.541 | 0.738, 0.968, 0.579 | 1.08x（保住明暗关系） |
+| 墙面背光 | 0.496, 0.452, 0.576 | 0.717, 0.674, 0.752 | **1.41x**（暗部有层次） |
+| 夜间背光 | 0.341, 0.418, 0.336 | 0.481, 0.601, 0.472 | **1.42x**（不再死黑） |
+
+**验收（待用户 Play）**：背光面不再是纯 `顶点色×ShadowTint`，
+而带方向性天光；夜间场景地面不会全黑。
+
+**附带产出**：`Tools/check_shader.ps1` —— 在独立临时工程里用 Unity 批处理
+（`ShaderUtil.ShaderHasError`）真实验证着色器编译。
+解决 `_check.ps1`（Roslyn 直编）覆盖不到 HLSL 的问题。
+用法：`powershell -File unity/Tools/check_shader.ps1`
+（许可客户端在沙箱里握手会报 Code 10，**不影响执行**；
+脚本内已清代理环境变量避免它连外网）
 
 ### A2 ★★★ 物件贴地（HeightAt 复用）
 **问题**：`HeightAt` (WorldBuilder.cs:383-384) 在 22m 处地形高 0.5~1.2m，

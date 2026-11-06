@@ -141,6 +141,7 @@ public class WorldExplore
     void BuildHero()
     {
         Pos = RegionSpawn[Mathf.Clamp(RegionIndex, 0, RegionSpawn.Length - 1)];
+        Pos.y = GroundY();
         HeroGo = new GameObject("ExploreHero");
         HeroGo.transform.position = Pos;
 
@@ -308,6 +309,7 @@ public class WorldExplore
         Arena = Arena.Build(WorldMap(region), G.transform, G.Cam);
         if (Arena.Theme != null) G.Cam.backgroundColor = Arena.Theme.Sky;
         Pos = spawn;
+        Pos.y = GroundY();
         if (HeroGo != null) HeroGo.transform.position = Pos;
         BuildSpots();
         G.Rig.SnapTo(Pos);
@@ -661,8 +663,14 @@ public class WorldExplore
         Pos.x = Mathf.Clamp(Pos.x, -WalkBound, WalkBound);
         Pos.z = Mathf.Clamp(Pos.z, -WalkBound, WalkBound);
         if (Arena != null) Arena.Resolve(ref Pos, 0.55f);
+        // 贴地：地形有起伏后，角色必须踩在地面上，不能陷进去或悬空
+        Pos.y = GroundY();
         HeroGo.transform.position = Pos;
     }
+
+    /// <summary>角色脚下的地面高度（地形有起伏，角色要跟着起伏走）。</summary>
+    float GroundY()
+        => Arena != null ? Arena.GroundHeight(Pos.x, Pos.z) : 0f;
 
     void AnimateHero(float dt)
     {

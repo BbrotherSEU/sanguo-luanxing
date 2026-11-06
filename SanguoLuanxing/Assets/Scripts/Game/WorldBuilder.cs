@@ -392,8 +392,8 @@ public class WorldBuilder
     int GroundKind(float x, float z)
     {
         if (OnPath(x, z)) return 1;
-        float edgeIn = wide ? 34f : 17f;
-        float edge = Mathf.InverseLerp(edgeIn, mapHalf, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
+        // 与 HeightAt 用同一条"可走区"边界，避免石头层和地形起伏对不上
+        float edge = Mathf.InverseLerp(PlayBound, mapHalf, Mathf.Max(Mathf.Abs(x), Mathf.Abs(z)));
         if (edge > 0.42f) return 2;
         if (Theme.SnowCaps > 0.5f && HeightAt(x, z) > 1.6f) return 2;
         return 0;
@@ -402,14 +402,36 @@ public class WorldBuilder
     float HeightAt(float x, float z)
     {
         float ax = Mathf.Abs(x), az = Mathf.Abs(z);
-        float edgeIn = wide ? 34f : 16.5f;
+        // 起伏从可走区之外才开始。
+        // 2.5D 俯视下角色是贴地走的，可走区一旦有起伏，角色就会陷进地面或悬空，
+        // 而且战斗是横版手感（角色 y 恒为 0），起伏会直接影响操作。
+        // 所以让可走区保持绝对平坦，起伏只出现在视野中景（相机看向的前方/外圈），
+        // 那才是"中景层次"真正起作用的地方。
+        float edgeIn = PlayBound;
         float edge = Mathf.InverseLerp(edgeIn, mapHalf, Mathf.Max(ax, az));
         float n = Fbm(x * 0.12f, z * 0.12f);
         float hills = edge * edge * (2.2f + n * 2.8f + Theme.PeakAmount * 1.4f);
         if (OnPath(x, z)) return 0.03f + edge * 0.4f;
         if (OnRiver(x, z)) return -0.08f;
-        return 0.02f + n * 0.045f + hills;
+        // 中景缓坡：低频（0.055）保证坡度平缓，出可走区后逐渐长起来，
+        // 让画面里的中景带不是一块平板。
+        float roll = Fbm(x * 0.055f + 31.7f, z * 0.055f - 17.3f);
+        float roll2 = Fbm(x * 0.021f - 8.1f, z * 0.021f + 5.5f);
+        float mid = (roll - 0.5f) * 0.52f + (roll2 - 0.5f) * 0.26f;
+        return 0.02f + n * 0.045f + mid * edge + hills;
     }
+
+    /// <summary>
+    /// 物件贴地高度：取该点的地形高度，再往下沉一点点让底部扎进地里，
+    /// 避免看起来像浮在坡面上。
+    /// 之前所有树/草/石头都直接放 y=0，外圈地形高 0.5~1.2m，
+    /// 于是外圈的石头埋进山坡、草悬空 —— 这里统一按地形落位。
+    /// </summary>
+    float GroundY(float x, float z, float sink = 0.02f)
+        => HeightAt(x, z) - sink;
+
+    /// <summary>该点的地面高度（对外：角色贴地走用）。</summary>
+    public float GroundHeight(float x, float z) => HeightAt(x, z);
 
     Color GroundCol(float x, float z)
     {
@@ -567,9 +589,11 @@ public class WorldBuilder
         float gap = kind == "bamboo" ? 1.9f : 3.05f;
         if (NearSpot(spots, x, z, gap)) return false;
         float h = TreeHeight(kind, rng);
-        if (!PlaceTree(kind, new Vector3(x, 0f, z), h))
+        // 按地形高度落位：树根要贴着坡面，否则外圈的树会浮空或半截埋进山
+        var p = new Vector3(x, GroundY(x, z, 0.05f), z);
+        if (!PlaceTree(kind, p, h))
         {
-            Tree(kind, new Vector3(x, 0f, z), rng.Next());
+            Tree(kind, p, rng.Next());
             anyMesh = true;
         }
         spots.Add(new Vector2(x, z));
@@ -687,10 +711,11 @@ public class WorldBuilder
                 float h = 0.78f + (float)rng.NextDouble() * 0.42f;
                 bool bloom = rng.NextDouble() < flower;
                 string file = bloom ? "tex/foliage/grass_flower.jpg" : main;
-                if (!PlaceCard(file, new Vector3(x, 0f, z), h, true, -8, 0f))
+                // 草按地形高度落位：贴着坡面长，否则外圈的草会浮在半空
+                if (!PlaceCard(file, new Vector3(x, GroundY(x, z, 0.01f), z), h, true, -8, 0f))
                 {
                     Color c = Color.Lerp(Theme.GrassA, Theme.GrassB, (float)rng.NextDouble());
-                    kit.Tuft(new Vector3(x, 0.02f, z), h * 0.85f, c, 5, rng.Next());
+                    kit.Tuft(new Vector3(x, GroundY(x, z, 0.01f), z), h * 0.85f, c, 5, rng.Next());
                     anyMesh = true;
                 }
             }
@@ -744,7 +769,8 @@ public class WorldBuilder
         if (spr == null) return false;
         var go = new GameObject("card");
         go.transform.SetParent(root, false);
-        go.transform.position = new Vector3(p.x, 0f, p.z);
+        // 用 p.y：调用方已经把物件按地形高度落位了，这里再抹平就会浮空
+        go.transform.position = new Vector3(p.x, p.y, p.z);
         if (cam != null)
         {
             Vector3 f = cam.transform.forward;
@@ -761,7 +787,8 @@ public class WorldBuilder
         {
             var sh = new GameObject("shade");
             sh.transform.SetParent(root, false);
-            sh.transform.position = new Vector3(p.x, 0.04f, p.z);
+            // 阴影跟着物件的地面高度，不然物件贴坡后影子会浮在坡面上方
+            sh.transform.position = new Vector3(p.x, p.y + 0.04f, p.z);
             sh.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
             var srr = sh.AddComponent<SpriteRenderer>();
             srr.sprite = Tex.CenterSprite(Tex.Shadow, shadow);
@@ -776,7 +803,9 @@ public class WorldBuilder
     {
         var sh = new GameObject("bshade");
         sh.transform.SetParent(root, false);
-        sh.transform.position = new Vector3(p.x, 0.04f, p.z);
+        // 建筑几何都以 p 为基准往上传，所以影子贴着 p 的地面高度放。
+        // 建筑都在内圈、地形几乎平（±4.5cm），这里用 p.y 就够了。
+        sh.transform.position = new Vector3(p.x, p.y + 0.04f, p.z);
         sh.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
         var sr = sh.AddComponent<SpriteRenderer>();
         sr.sprite = Tex.CenterSprite(Tex.Shadow, radius);
@@ -849,8 +878,11 @@ public class WorldBuilder
         {
             if (OnRiver(0f, z)) continue;
             float s = 0.16f + Mathf.Abs(Mathf.Sin(z * 1.7f)) * 0.1f;
-            kit.Blob(new Vector3(-2.55f, s * 0.28f, z), new Vector3(s, s * 0.42f, s * 0.75f), Theme.Rock, 2, 5, 0.16f, (int)(z * 9f));
-            kit.Blob(new Vector3(2.55f, s * 0.26f, z + 0.45f), new Vector3(s * 0.85f, s * 0.38f, s * 0.7f), Theme.Cliff, 2, 5, 0.14f, (int)(z * 9f + 4f));
+            // 路边石按官道高度落位（官道在 OnPath 分支里单独算高度）
+            float gl = GroundY(-2.55f, z, s * 0.2f);
+            float gr = GroundY(2.55f, z + 0.45f, s * 0.2f);
+            kit.Blob(new Vector3(-2.55f, gl + s * 0.28f, z), new Vector3(s, s * 0.42f, s * 0.75f), Theme.Rock, 2, 5, 0.16f, (int)(z * 9f));
+            kit.Blob(new Vector3(2.55f, gr + s * 0.26f, z + 0.45f), new Vector3(s * 0.85f, s * 0.38f, s * 0.7f), Theme.Cliff, 2, 5, 0.14f, (int)(z * 9f + 4f));
         }
         if (kit.Count > 0) Emit("pathstones", kit.Build("pathstones", true), rockMat != null ? rockMat : toonOut, true);
     }
@@ -868,9 +900,11 @@ public class WorldBuilder
             if (KeepClear(x, z, 4f) || OnPath(x, z) || OnRiver(x, z) || NearPack(x, z, 3f)) continue;
             float s = 0.35f + (float)rng.NextDouble() * 0.7f;
             Color c = Color.Lerp(Theme.Rock, Theme.Cliff, (float)rng.NextDouble() * 0.5f);
-            kit.Blob(new Vector3(x, s * 0.35f, z), new Vector3(s, s * 0.55f, s * 0.8f), c, 3, 6, 0.22f, rng.Next());
+            // 按地形高度落位：外圈山坡高 0.5~1.2m，固定 y 会把石头埋进坡里
+            float gy = GroundY(x, z, s * 0.15f);
+            kit.Blob(new Vector3(x, gy + s * 0.35f, z), new Vector3(s, s * 0.55f, s * 0.8f), c, 3, 6, 0.22f, rng.Next());
             if (Theme.SnowCaps > 0.5f)
-                kit.Blob(new Vector3(x, s * 0.7f, z), new Vector3(s * 0.45f, s * 0.18f, s * 0.4f), Theme.Peak, 2, 5, 0.1f, rng.Next());
+                kit.Blob(new Vector3(x, gy + s * 0.7f, z), new Vector3(s * 0.45f, s * 0.18f, s * 0.4f), Theme.Peak, 2, 5, 0.1f, rng.Next());
             Obstacles.Add(new Obstacle(x, z, s * 0.55f));
         }
         Emit("rocks", kit.Build("rocks", true), rockMat, true);
@@ -1108,7 +1142,8 @@ public class WorldBuilder
     void TryTreeAt(string kind, float x, float z, float h)
     {
         if (!Open(x, z, 1.8f)) return;
-        if (PlaceTree(kind, new Vector3(x, 0f, z), h))
+        // 按地形高度落位，和 Trees() 里的做法一致
+        if (PlaceTree(kind, new Vector3(x, GroundY(x, z, 0.05f), z), h))
             Obstacles.Add(new Obstacle(x, z, 0.5f));
     }
 
@@ -1215,8 +1250,10 @@ public class WorldBuilder
                 float z = rz + side * (2.25f + (float)rng.NextDouble() * 0.35f);
                 if (OnPath(x, z) || KeepClear(x, z, 1.3f) || NearPack(x, z, 1.2f)) continue;
                 float h = 1.35f + (float)rng.NextDouble() * 0.45f;
-                if (!PlaceCard("tex/foliage/reed.jpg", new Vector3(x, 0f, z), h, true, -6, 0.35f))
-                    ReedMesh(new Vector3(x, 0f, z), rng.Next());
+                // 芦苇贴着河岸的地面长（河岸高度随地形变化）
+                var rp = new Vector3(x, GroundY(x, z, 0.01f), z);
+                if (!PlaceCard("tex/foliage/reed.jpg", rp, h, true, -6, 0.35f))
+                    ReedMesh(rp, rng.Next());
             }
         }
     }
