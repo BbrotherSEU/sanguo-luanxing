@@ -224,6 +224,9 @@ public class WorldBuilder
             Time01 = 0.30f,
             // 接地阴影的浓度跟着太阳走：夜里没直射光，影子就该淡掉
             ShadowMat = shadowMat,
+            // 天空穹顶在地平线处的顶点色。雾色由它派生，
+            // 远处的地面才会和天空无缝接上。
+            Horizon = SkyCol(0f),
         };
         if (Settings.Current != null && Settings.Current.DayPhase >= 0f)
             cycle.Time01 = Settings.Current.DayPhase;
@@ -389,31 +392,36 @@ public class WorldBuilder
         if (contacts.Count == 0) return;
         kit.Clear();
         kit.KeepAlpha = true;
-        const int seg = 10;
-        var inner = new Vector3[seg];
-        var outer = new Vector3[seg];
+        const int seg = 12;
+        // 三圈环 + 中心点：alpha 逐圈衰减，插值出软斑而不是锥形
+        var r1 = new Vector3[seg];
+        var r2 = new Vector3[seg];
+        var r3 = new Vector3[seg];
         for (int i = 0; i < contacts.Count; i++)
         {
             var c = contacts[i];
             Vector3 ctr = new Vector3(c.X, SurfaceY(c.X, c.Z) + 0.03f, c.Z);
-            Color cMid = new Color(1f, 1f, 1f, c.A);
-            Color cIn = new Color(1f, 1f, 1f, c.A * 0.45f);
-            Color cOut = new Color(1f, 1f, 1f, 0f);
+            Color c0 = new Color(1f, 1f, 1f, c.A);
+            Color c1 = new Color(1f, 1f, 1f, c.A * 0.62f);
+            Color c2 = new Color(1f, 1f, 1f, c.A * 0.22f);
+            Color c3 = new Color(1f, 1f, 1f, 0f);
             for (int s = 0; s < seg; s++)
             {
                 float ang = s * Mathf.PI * 2f / seg;
                 float ca = Mathf.Cos(ang), sa = Mathf.Sin(ang);
-                float ix = c.X + ca * c.R * 0.45f, iz = c.Z + sa * c.R * 0.45f;
-                float ox = c.X + ca * c.R, oz = c.Z + sa * c.R;
-                inner[s] = new Vector3(ix, SurfaceY(ix, iz) + 0.03f, iz);
-                outer[s] = new Vector3(ox, SurfaceY(ox, oz) + 0.03f, oz);
+                float x1 = c.X + ca * c.R * 0.42f, z1 = c.Z + sa * c.R * 0.42f;
+                float x2 = c.X + ca * c.R * 0.74f, z2 = c.Z + sa * c.R * 0.74f;
+                float x3 = c.X + ca * c.R, z3 = c.Z + sa * c.R;
+                r1[s] = new Vector3(x1, SurfaceY(x1, z1) + 0.03f, z1);
+                r2[s] = new Vector3(x2, SurfaceY(x2, z2) + 0.03f, z2);
+                r3[s] = new Vector3(x3, SurfaceY(x3, z3) + 0.03f, z3);
             }
-            // 两圈扇面拼一个软斑：中心浓、边缘没，插值出径向衰减
             for (int s = 0; s < seg; s++)
             {
                 int n = (s + 1) % seg;
-                kit.TriColors(ctr, inner[s], inner[n], cMid, cIn, cIn);
-                kit.TriColors(inner[s], outer[s], outer[n], cIn, cOut, cOut);
+                kit.TriColors(ctr, r1[s], r1[n], c0, c1, c1);
+                kit.TriColors(r1[s], r2[s], r2[n], c1, c2, c2);
+                kit.TriColors(r2[s], r3[s], r3[n], c2, c3, c3);
             }
         }
         kit.KeepAlpha = false;

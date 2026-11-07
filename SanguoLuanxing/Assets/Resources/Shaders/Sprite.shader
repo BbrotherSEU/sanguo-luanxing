@@ -17,6 +17,7 @@ Shader "Sanguo/Sprite"
         [HideInInspector] _Flip ("Flip", Vector) = (1,1,1,1)
         [PerRendererData] _AlphaTex ("External Alpha", 2D) = "white" {}
         [PerRendererData] _EnableExternalAlpha ("Enable External Alpha", Float) = 0
+        _FogMix ("Fog Mix", Range(0,1)) = 1
     }
     SubShader
     {
@@ -29,19 +30,58 @@ Shader "Sanguo/Sprite"
         Pass
         {
             CGPROGRAM
-            #pragma vertex SpriteVert
+            #pragma vertex SpriteVertFog
             #pragma fragment frag
             #pragma target 3.0
             #pragma multi_compile_instancing
             #pragma multi_compile_local _ PIXELSNAP_ON
             #pragma multi_compile _ ETC1_EXTERNAL_ALPHA
+            #pragma multi_compile_fog
             #include "UnitySprites.cginc"
 
             fixed _Flash;
             fixed4 _FlashColor, _OutlineColor;
             float _OutlineU, _OutlineV, _LightTop, _LightBottom;
+            float _FogMix;
 
-            fixed4 frag(v2f IN) : SV_Target
+            // 自己写顶点阶段：UnitySprites.cginc 的 SpriteVert 不填 fogCoord，
+            // 而片元阶段要用雾就得有雾坐标。
+            struct v2fFog
+            {
+                float4 vertex   : SV_POSITION;
+                fixed4 color    : COLOR;
+                float2 texcoord : TEXCOORD0;
+                UNITY_VERTEX_OUTPUT_STEREO
+                float fog : TEXCOORD1;
+            };
+
+            v2fFog SpriteVertFog(appdata_t IN)
+            {
+                v2fFog OUT;
+                UNITY_SETUP_INSTANCE_ID(IN);
+                UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(OUT);
+
+                OUT.vertex = UnityFlipSprite(IN.vertex, _Flip);
+                OUT.vertex = UnityObjectToClipPos(OUT.vertex);
+                OUT.texcoord = IN.texcoord;
+                OUT.color = IN.color * _Color * _RendererColor;
+
+                // 雾因子在顶点阶段算好：1 = 完全没有雾，0 = 雾最浓。
+                // 用官方的 UNITY_CALC_FOG_FACTOR，它按当前雾模式（线性/指数）
+                // 取对应的公式，换雾模式时这里不用改。
+                // 注意不能用 UnitySprites.cginc 的 fogCoord ——
+                // 桌面端它存的是裁剪空间 z，移动端存的才是因子，两端语义不同。
+                UNITY_CALC_FOG_FACTOR(OUT.vertex.z);
+                OUT.fog = saturate(unityFogFactor);
+
+                #ifdef PIXELSNAP_ON
+                OUT.vertex = UnityPixelSnap(OUT.vertex);
+                #endif
+
+                return OUT;
+            }
+
+            fixed4 frag(v2fFog IN) : SV_Target
             {
                 fixed4 tex = SampleSpriteTexture(IN.texcoord);
                 fixed4 body = tex * IN.color;
@@ -71,6 +111,17 @@ Shader "Sanguo/Sprite"
                 }
 
                 body.rgb *= body.a;
+                // 雾：远处角色要跟着地面一起淡出，
+                // 否则角色在雾里还是清清楚楚的，像浮在空中。
+                // 雾因子在顶点阶段算好了（IN.fog：1 = 无雾，0 = 雾最浓）。
+                // 只改 rgb 不改 alpha 的话，角色会变成一块"雾色方块"。
+                float fogFac = IN.fog;
+                // body.rgb 此时已经乘过 alpha，这里要还原成直通色再混雾。
+                // alpha 极小时不做除法，直接用原色，避免除出 NaN。
+                fixed3 lit = body.a > 1e-4 ? body.rgb / body.a : body.rgb;
+                fixed3 fogged = lerp(lit, unity_FogColor.rgb, 1.0 - fogFac);
+                body.rgb = lerp(lit, fogged, _FogMix) * body.a;
+                body.a *= lerp(1.0, fogFac, _FogMix);
                 return body;
             }
             ENDCG

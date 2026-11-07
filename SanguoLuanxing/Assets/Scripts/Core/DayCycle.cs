@@ -56,12 +56,22 @@ public class DayCycle
         Apply();
     }
 
+    /// <summary>
+    /// 天空地平线处的颜色（场景烘出来的）。
+    /// 雾色直接由它派生 —— 远处的地面才会和天空无缝接上。
+    /// </summary>
+    public Color Horizon = new Color(0.8f, 0.88f, 0.95f);
+
     /// <summary>把当前时间的光照写到引擎上</summary>
     public void Apply()
     {
         float u = Time01;
         Color sky = SampleSky(u);
-        Color fog = Color.Lerp(sky, Theme != null ? Theme.Fog : Color.white, 0.35f);
+        // 雾色 = 地平线色。天空穹顶在地平线附近就是这个颜色，
+        // 地面远处淡入这个颜色，两者才接得上。
+        // 之前雾色是 Lerp(天空色, Theme.Fog, 0.35)，和地平线色不是一回事，
+        // 于是地面和天空之间有一道可见的色差带。
+        Color fog = Color.Lerp(Horizon, sky, 0.30f);
 
         // 太阳高度：日出日落时贴近地平（阴影拉长），正午最高
         float elev = Mathf.Sin((u - 0.25f) * Mathf.PI * 2f) * 0.5f + 0.5f;   // 0..1
