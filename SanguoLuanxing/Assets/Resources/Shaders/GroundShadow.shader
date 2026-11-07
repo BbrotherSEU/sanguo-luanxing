@@ -9,6 +9,8 @@ Shader "Sanguo/GroundShadow"
     Properties
     {
         _Strength ("Strength", Range(0,1.5)) = 1
+        _FogStart ("Fog Start", Float) = 40
+        _FogEnd ("Fog End", Float) = 100
     }
     SubShader
     {
@@ -27,6 +29,8 @@ Shader "Sanguo/GroundShadow"
             #include "UnityCG.cginc"
 
             float _Strength;
+            float _FogStart;
+            float _FogEnd;
 
             struct appdata
             {
@@ -38,7 +42,7 @@ Shader "Sanguo/GroundShadow"
             {
                 float4 pos : SV_POSITION;
                 fixed4 col : COLOR;
-                UNITY_FOG_COORDS(1)
+                float fog : TEXCOORD1;
             };
 
             v2f vert(appdata v)
@@ -46,7 +50,12 @@ Shader "Sanguo/GroundShadow"
                 v2f o;
                 o.pos = UnityObjectToClipPos(v.vertex);
                 o.col = v.color;
-                UNITY_TRANSFER_FOG(o, o.pos);
+                // 自己按雾的起止距离算衰减：
+                // fogCoord 在桌面端是原始 z、在移动端才是因子，不能直接用；
+                // 这里用视空间距离自己算，跨平台一致。
+                float3 wp = mul(unity_ObjectToWorld, v.vertex).xyz;
+                float dist = distance(wp, _WorldSpaceCameraPos);
+                o.fog = saturate((_FogEnd - dist) / max(1.0, _FogEnd - _FogStart));
                 return o;
             }
 
@@ -55,8 +64,7 @@ Shader "Sanguo/GroundShadow"
                 // 顶点色的 alpha 就是这片影子的浓度（中心浓、边缘 0）
                 float a = saturate(i.col.a) * _Strength;
                 // 远处地面已经被雾冲淡，影子也要跟着淡掉，否则远处会看到一排黑斑
-                // UNITY_FOG_FACTOR 随距离从 0 长到 1，所以要取反
-                a *= 1.0 - UNITY_FOG_FACTOR(i.fogCoord);
+                a *= i.fog;
                 // 越靠近中心压得越暗；边缘回到 1（完全不改变原色）
                 float kr = 1.0 - a * 0.62f;
                 // 蓝通道压得少一点，阴影偏冷，和环境光的冷色一致

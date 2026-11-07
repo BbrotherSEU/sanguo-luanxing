@@ -180,9 +180,23 @@ public class WorldBuilder
         if (!autoCycle && phase01 >= 0f) cycle.Time01 = phase01;
         cycle.Apply();
         // 雾的远近也按视野设置重算一次
+        ApplyFogDistance();
+    }
+
+    /// <summary>
+    /// 按视野设置重算雾的起止距离，并同步给接地阴影材质 ——
+    /// 影子按同一段距离淡出，否则远处地面被雾冲淡了、影子却还黑着。
+    /// </summary>
+    void ApplyFogDistance()
+    {
         float vd = Settings.Current != null ? Settings.Current.ViewDistance : 1f;
         RenderSettings.fogStartDistance = (wide ? 52f : Theme.FogStart) * vd;
         RenderSettings.fogEndDistance = (wide ? 128f : Theme.FogEnd) * vd;
+        if (shadowMat != null)
+        {
+            shadowMat.SetFloat("_FogStart", RenderSettings.fogStartDistance);
+            shadowMat.SetFloat("_FogEnd", RenderSettings.fogEndDistance);
+        }
     }
 
     // ---------------- 光 / 天 ----------------
@@ -223,14 +237,12 @@ public class WorldBuilder
         RenderSettings.fog = true;
         RenderSettings.fogMode = FogMode.Linear;
         // 视野距离设置：0.6 拉近（雾更近，看得清）~ 1.6 推远（雾更远，看得广）
-        float vd = Settings.Current != null ? Settings.Current.ViewDistance : 1f;
-        RenderSettings.fogStartDistance = (wide ? 52f : Theme.FogStart) * vd;
-        RenderSettings.fogEndDistance = (wide ? 128f : Theme.FogEnd) * vd;
+        ApplyFogDistance();
         if (cam != null)
         {
             cam.clearFlags = CameraClearFlags.SolidColor;
             cam.backgroundColor = Theme.Sky;
-            cam.farClipPlane = 220f * vd;
+            cam.farClipPlane = 220f * (Settings.Current != null ? Settings.Current.ViewDistance : 1f);
         }
     }
 
