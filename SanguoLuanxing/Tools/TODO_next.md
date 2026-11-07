@@ -142,7 +142,7 @@ Grass → PathDressing → Architecture → Landmarks → Scenes → Ambient。
 - 新增 `Sanguo/GroundShadow.shader`：乘法混合（`Blend DstColor Zero`），
   地面被压暗但**不失真**（草地还是绿的）；顶点色 alpha 画径向衰减
 - `WorldBuilder.BuildContacts()` 把所有物件的落影烘成**一张网格**（1 个 draw call）
-- 每个暗斑是「中心 + 两圈扇面」，顶点高度取 **`SurfaceY()`**：
+- 每个暗斑是「中心 + 三圈扇面」，顶点高度取 **`SurfaceY()`**：
   完全按地形网格的两个三角形插值，与 `EmitGround` 生成的地面**逐点一致**
   ——直接用 `HeightAt` 会有偏差（网格是格点插值，函数是连续的），
   坡上偏差能到十几厘米，影子会一半陷进地里、一半浮在空中
@@ -150,6 +150,8 @@ Grass → PathDressing → Architecture → Landmarks → Scenes → Ambient。
   （帐篷/木箱/干草/稻草人/木柴/长凳/小船/栈桥/晾架/神龛/石碑/火堆/火把/旗杆/谷堆/栅栏柱…）
 - 强度随昼夜变化：`DayCycle.ShadowMat` → `_Strength` 跟着 `Sun.intensity` 走，
   夜里没有直射光，影子淡到几乎没有（否则夜景里是一堆死黑的斑）
+- 远处影子按**同一段雾的起止距离**淡出（`_FogStart/_FogEnd`），
+  否则远处地面被雾冲淡了、影子却还黑着，远看浮出一排黑斑
 
 **踩坑（重要）**：
 1. `MeshKit.Col()` 会把顶点色 alpha 覆写成 `1 - sway`（alpha 被当成风摆权重用）。
@@ -158,11 +160,33 @@ Grass → PathDressing → Architecture → Landmarks → Scenes → Ambient。
    正好夹在地面（Geometry=2000）与角色/立绘（Transparent=3000）之间。
 3. `Blend DstColor Zero` 是乘法混合，**要求目标颜色已经画在帧缓冲里** ——
    所以队列号必须大于地面的 Geometry 队列，否则影子会把天空也乘暗。
+4. 旧 `BuildShadow(p, radius, alpha)` 的 `radius` 其实是**精灵的世界尺寸（直径）**，
+   改成半径语义时别忘了折半（`size * 0.5f`），否则影子大了一圈。
 
-### A5 ★★☆ 雾与天空地平线对齐
-**问题**：雾色 (`DayCycle:77`) 与天空穹顶 (`SkyCol:258`) **分别计算，地平线不对齐**；
+### A5 ★★☆ 雾与天空地平线对齐 ✅ 已完成 commit `8d9844b`
+**问题**：雾色 (`DayCycle:64`) 与天空穹顶 (`SkyCol:313`) **分别计算，地平线不对齐**；
 线性雾近处无变化 → 缺纵深。
-**改法**：雾色直接采样天空底色（同一函数），让远处地平线无缝；加雾的浓度分层。
+
+**改法**：
+- 雾色改为由**天空地平线色**派生：场景把 `SkyCol(0)`（穹顶地平线处的顶点色）
+  传给 `DayCycle.Horizon`，雾色再由它派生 → 远处地面淡入的颜色 = 地平线色，两者无缝
+  （之前雾色是 `Lerp(天空色, Theme.Fog, 0.35)`，和地平线色不是一回事，
+  于是地面和天空之间有一道可见的色差带）
+- **发现并修掉一个更大的问题**：`Sanguo/Sprite`（角色立绘、树草卡片）
+  **原本完全没有雾** —— 远处角色在雾里仍清清楚楚，像浮在空中。给它补上雾支持。
+
+**着色器踩坑（`Sanguo/Sprite` 加雾）**：
+1. `UnitySprites.cginc` 的 `v2f` 结构**没有 fogCoord**，`SpriteVert` 也不填 ——
+   想用官方雾宏就得自己写顶点阶段（复制 SpriteVert 的逻辑 + 补雾坐标）。
+2. `fogCoord.x` 的语义**两端不同**：桌面端存裁剪空间 z，移动端存已算好的因子。
+   直接拿来用会在其中一端算错 → 干脆在顶点阶段用
+   `UNITY_CALC_FOG_FACTOR(OUT.vertex.z)` 自己算好因子，传自己的 varying。
+3. `UNITY_APPLY_FOG` **只改 rgb 不改 alpha** —— 那样角色会变成一块"雾色方块"。
+   雾要同时压 alpha 才是真正的淡出。
+4. `UNITY_CALC_FOG_FACTOR_RAW` 内部会声明局部变量 `unityFogFactor`，
+   和 `UNITY_APPLY_FOG` 内部那份**同名重名** → 同一作用域里调两次会编译失败。
+5. `body.rgb` 在片元里已乘过 alpha（预乘），混雾前要先还原成直通色，
+   alpha 极小时别做除法（会出 NaN）。
 
 ### A6 ★★☆ 远景剪影层
 **问题**：场景边缘被 fogEnd 直接切断，没有山峦/远树线/城郭剪影。
