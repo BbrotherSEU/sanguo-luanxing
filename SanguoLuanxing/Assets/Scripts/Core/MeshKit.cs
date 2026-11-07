@@ -18,6 +18,12 @@ public class MeshKit
     public Matrix4x4 M = Matrix4x4.identity;
     /// <summary>当前风摆权重 0..1</summary>
     public float Sway;
+    /// <summary>
+    /// 保留顶点色自带的 alpha。
+    /// 默认 alpha 被当成"风摆权重"覆盖掉（1 - sway），
+    /// 但接地阴影要靠 alpha 做中心到边缘的衰减，这时必须原样保留。
+    /// </summary>
+    public bool KeepAlpha;
 
     public int Count => v.Count;
 
@@ -27,7 +33,7 @@ public class MeshKit
 
     Color32 Col(Color col, float sway)
     {
-        col.a = 1f - Mathf.Clamp01(sway);
+        if (!KeepAlpha) col.a = 1f - Mathf.Clamp01(sway);
         return col;
     }
 
@@ -337,5 +343,6 @@ public class MeshKit
         v.Clear(); n.Clear(); c.Clear(); t.Clear();
         M = Matrix4x4.identity;
         Sway = 0f;
+        KeepAlpha = false;
     }
 }

@@ -317,6 +317,16 @@ public static class Look
         if (m.HasProperty("_FogMix")) m.SetFloat("_FogMix", fogMix);
         return m;
     }
+
+    /// <summary>
+    /// 接地阴影材质：所有阴影合成一张网格，只用一个 draw call。
+    /// _Strength 由昼夜循环驱动（夜里没有直射光，影子就该淡掉）。
+    /// </summary>
+    public static Material NewGroundShadow()
+    {
+        var m = new Material(Find("Sanguo/GroundShadow"));
+        return m;
+    }
 }
 
 /// <summary>

@@ -127,10 +127,37 @@ Grass → PathDressing → Architecture → Landmarks → Scenes → Ambient。
 **配套**：`GroundKind` 的石头层边界同步改成 `PlayBound`（否则与地形对不上）；
 `Arena` 暴露 `GroundHeight()`，`WorldExplore` 按地形高度贴地走（3 处位置更新）。
 
-### A4 ★★☆ 接地阴影 / 接触阴影
+### A4 ★★☆ 接地阴影 / 接触阴影 ✅ 已完成
 **问题**：无 AO、无 SSAO、后处理只有泛光+分级+暗角；
-接地只有 `BuildShadow` (:751) 一张黑椭圆，**只覆盖建筑与树，草和石头没有**。
-**改法**：给草/石头/灌木也生成椭圆接地影（复用 BuildShadow），并按材质深浅调透明度。
+接地只有 `BuildShadow` 一张黑椭圆精灵，**只覆盖建筑与树，草和石头没有**。
+
+**改法（与原设想不同，记录原因）**：
+原来打算「给草/石头/灌木也生成椭圆接地影（复用 BuildShadow）」——
+即每个物件挂一张黑椭圆精灵。**没这么做**，因为：
+- 草有 300+ 株，每株挂一个 GameObject + SpriteRenderer = 几百个额外对象和 draw call
+- 旧精灵是**纯黑**（`color(0,0,0,0.28)`）盖在地面上，
+  会把草地压成脏灰色，正是要避免的
+
+**最终实现：一张合批的接地暗斑网格**
+- 新增 `Sanguo/GroundShadow.shader`：乘法混合（`Blend DstColor Zero`），
+  地面被压暗但**不失真**（草地还是绿的）；顶点色 alpha 画径向衰减
+- `WorldBuilder.BuildContacts()` 把所有物件的落影烘成**一张网格**（1 个 draw call）
+- 每个暗斑是「中心 + 两圈扇面」，顶点高度取 **`SurfaceY()`**：
+  完全按地形网格的两个三角形插值，与 `EmitGround` 生成的地面**逐点一致**
+  ——直接用 `HeightAt` 会有偏差（网格是格点插值，函数是连续的），
+  坡上偏差能到十几厘米，影子会一半陷进地里、一半浮在空中
+- 覆盖范围：草、石头、树（卡片/网格两种）、芦苇、建筑、以及全部场景杂物
+  （帐篷/木箱/干草/稻草人/木柴/长凳/小船/栈桥/晾架/神龛/石碑/火堆/火把/旗杆/谷堆/栅栏柱…）
+- 强度随昼夜变化：`DayCycle.ShadowMat` → `_Strength` 跟着 `Sun.intensity` 走，
+  夜里没有直射光，影子淡到几乎没有（否则夜景里是一堆死黑的斑）
+
+**踩坑（重要）**：
+1. `MeshKit.Col()` 会把顶点色 alpha 覆写成 `1 - sway`（alpha 被当成风摆权重用）。
+   接地阴影要靠 alpha 画衰减 → 给 `MeshKit` 加 `KeepAlpha` 开关绕开。
+2. 阴影网格必须排在地面之后、角色之前：`Queue="Transparent-50"`（= 2950）
+   正好夹在地面（Geometry=2000）与角色/立绘（Transparent=3000）之间。
+3. `Blend DstColor Zero` 是乘法混合，**要求目标颜色已经画在帧缓冲里** ——
+   所以队列号必须大于地面的 Geometry 队列，否则影子会把天空也乘暗。
 
 ### A5 ★★☆ 雾与天空地平线对齐
 **问题**：雾色 (`DayCycle:77`) 与天空穹顶 (`SkyCol:258`) **分别计算，地平线不对齐**；

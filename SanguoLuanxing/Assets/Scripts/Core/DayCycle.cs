@@ -15,6 +15,11 @@ public class DayCycle
     /// <summary>云朵网格的材质列表：跟着时段染暖色</summary>
     public List<Material> CloudMats;
     /// <summary>
+    /// 接地阴影材质：强度跟着太阳走。
+    /// 夜里没有直射光，影子就该淡到几乎没有 —— 否则夜景里会看到一堆死黑的斑。
+    /// </summary>
+    public Material ShadowMat;
+    /// <summary>
     /// 需要吃方向性环境光的材质（地面/建筑/石头等）。
     /// 天空与云不加入：它们已经由 tint 按时段染过一遍，再叠环境光会二次染色。
     /// </summary>
@@ -71,6 +76,10 @@ public class DayCycle
             float baseI = Theme != null ? Theme.LightIntensity : 1.1f;
             Sun.intensity = baseI * Mathf.Lerp(0.06f, 1.12f, dayness);
             Sun.enabled = Sun.intensity > 0.02f;
+
+            // 接地阴影跟着太阳强度走：夜里没直射光，影子淡到几乎没有。
+            if (ShadowMat != null && ShadowMat.HasProperty("_Strength"))
+                ShadowMat.SetFloat("_Strength", Mathf.Clamp01(Sun.intensity / Mathf.Max(0.05f, baseI * 1.12f)) * 0.92f);
         }
 
         // 环境光：天顶取天空色，地面取阴影色

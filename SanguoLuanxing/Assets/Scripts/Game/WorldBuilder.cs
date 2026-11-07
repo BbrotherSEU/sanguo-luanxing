@@ -19,11 +19,18 @@ public class WorldBuilder
     readonly List<Transform> clouds = new List<Transform>();
     readonly List<Puff> puffs = new List<Puff>();
     readonly List<Card> cards = new List<Card>();
+    readonly List<Contact> contacts = new List<Contact>();
     readonly Dictionary<string, Sprite> folioSpr = new Dictionary<string, Sprite>();
     readonly HashSet<string> folioMiss = new HashSet<string>();
     int fires;
     Material toon, toonOut, waterMat, grassMat, pathMat, cliffMat, rockMat, archMat;
-    Material skyMat;
+    Material skyMat, shadowMat;
+    // 地形网格：渲染出来的地面高度只能靠它精确还原。
+    // HeightAt 是连续函数，地形网格只采样格点再线性插值，两者并不完全一样，
+    // 影子按 HeightAt 放会一半陷进地里、一半浮在空中。
+    float[,] terrH;
+    int terrN;
+    float terrStep, terrHalf;
     DayCycle cycle;
     bool battlefield;
     bool wide;
@@ -49,6 +56,25 @@ public class WorldBuilder
         public bool Sway;
     }
 
+    /// <summary>
+    /// 接地阴影记录：最后合成成一张网格，一个 draw call 画完全部影子。
+    /// 之前是每个物件挂一张黑椭圆精灵 —— 几百个 GameObject + SpriteRenderer，
+    /// 而且草/石头/道具根本没有影子。现在统一收集、最后烘成一片。
+    /// </summary>
+    class Contact
+    {
+        public float X, Z;   // 中心
+        public float R;     // 半径
+        public float A;     // 强度（中心最浓）
+    }
+
+    /// <summary>记录一片接地阴影。r 是半径（不是直径），a 是中心浓度。</summary>
+    void AddContact(float x, float z, float r, float a)
+    {
+        if (r <= 0.02f || a <= 0.01f) return;
+        contacts.Add(new Contact { X = x, Z = z, R = r, A = a });
+    }
+
     public void Build(Transform parent, MapDef map, Camera cam)
     {
         this.map = map;
@@ -64,6 +90,7 @@ public class WorldBuilder
         toon = Look.NewToon(Theme, false);
         toonOut = Look.NewToon(Theme, true, battlefield ? 0.18f : 0.26f);
         waterMat = Look.NewWater(Theme);
+        shadowMat = Look.NewGroundShadow();
         PaintMaterials();
 
         Lights();
@@ -78,6 +105,8 @@ public class WorldBuilder
         Architecture();
         Landmarks();
         Scenes();
+        // 接地阴影最后烘：所有物件都摆完了才知道该在哪儿落影
+        BuildContacts();
         Ambient();
     }
 
@@ -127,12 +156,14 @@ public class WorldBuilder
             if (meshes[i] != null) Object.Destroy(meshes[i]);
         meshes.Clear();
         if (skyMat != null) { Object.Destroy(skyMat); skyMat = null; }
+        if (shadowMat != null) { Object.Destroy(shadowMat); shadowMat = null; }
         if (cycle != null && cycle.CloudMats != null)
         {
             for (int i = 0; i < cycle.CloudMats.Count; i++)
                 if (cycle.CloudMats[i] != null) Object.Destroy(cycle.CloudMats[i]);
             cycle.CloudMats = null;
         }
+        if (cycle != null) cycle.ShadowMat = null;
         for (int i = 0; i < puffs.Count; i++)
             if (puffs[i].Tr != null) Object.Destroy(puffs[i].Tr.gameObject);
         puffs.Clear();
@@ -177,6 +208,8 @@ public class WorldBuilder
             Auto = Settings.Current == null || Settings.Current.DayCycle,
             DayLength = 300f,
             Time01 = 0.30f,
+            // 接地阴影的浓度跟着太阳走：夜里没直射光，影子就该淡掉
+            ShadowMat = shadowMat,
         };
         if (Settings.Current != null && Settings.Current.DayPhase >= 0f)
             cycle.Time01 = Settings.Current.DayPhase;
@@ -335,6 +368,47 @@ public class WorldBuilder
         if (m != null && m.HasProperty("_AmbStrength")) m.SetFloat("_AmbStrength", v);
     }
 
+    /// <summary>
+    /// 把所有接地阴影烘成一张网格：一次 draw call 画完，
+    /// 而且阴影顶点直接取地形网格的插值高度 —— 贴得死，不会陷进地里。
+    /// </summary>
+    void BuildContacts()
+    {
+        if (contacts.Count == 0) return;
+        kit.Clear();
+        kit.KeepAlpha = true;
+        const int seg = 10;
+        var inner = new Vector3[seg];
+        var outer = new Vector3[seg];
+        for (int i = 0; i < contacts.Count; i++)
+        {
+            var c = contacts[i];
+            Vector3 ctr = new Vector3(c.X, SurfaceY(c.X, c.Z) + 0.03f, c.Z);
+            Color cMid = new Color(1f, 1f, 1f, c.A);
+            Color cIn = new Color(1f, 1f, 1f, c.A * 0.45f);
+            Color cOut = new Color(1f, 1f, 1f, 0f);
+            for (int s = 0; s < seg; s++)
+            {
+                float ang = s * Mathf.PI * 2f / seg;
+                float ca = Mathf.Cos(ang), sa = Mathf.Sin(ang);
+                float ix = c.X + ca * c.R * 0.45f, iz = c.Z + sa * c.R * 0.45f;
+                float ox = c.X + ca * c.R, oz = c.Z + sa * c.R;
+                inner[s] = new Vector3(ix, SurfaceY(ix, iz) + 0.03f, iz);
+                outer[s] = new Vector3(ox, SurfaceY(ox, oz) + 0.03f, oz);
+            }
+            // 两圈扇面拼一个软斑：中心浓、边缘没，插值出径向衰减
+            for (int s = 0; s < seg; s++)
+            {
+                int n = (s + 1) % seg;
+                kit.TriColors(ctr, inner[s], inner[n], cMid, cIn, cIn);
+                kit.TriColors(inner[s], outer[s], outer[n], cIn, cOut, cOut);
+            }
+        }
+        kit.KeepAlpha = false;
+        var mesh = kit.Build("contact", false, false);
+        Emit("contact", mesh, shadowMat, false);
+    }
+
     void Terrain()
     {
         int n = wide ? 72 : 64;
@@ -352,9 +426,35 @@ public class WorldBuilder
             col[ix, iz] = GroundCol(x, z);
             kind[ix, iz] = GroundKind(x, z);
         }
+        // 存下网格：接地阴影必须贴住"真正画出来的那块地面"，
+        // 网格只采样格点再线性插值，和连续函数 HeightAt 并不相同。
+        terrH = h; terrN = n; terrStep = step; terrHalf = half;
         EmitGround(n, half, step, h, col, kind, 0, grassMat, "ground");
         EmitGround(n, half, step, h, col, kind, 1, pathMat, "path");
         EmitGround(n, half, step, h, col, kind, 2, cliffMat, "cliff");
+    }
+
+    /// <summary>
+    /// 渲染出来的地面高度：完全按地形网格的两个三角形插值，
+    /// 和 EmitGround 生成的网格逐点一致。
+    /// 影子贴地用 HeightAt 会有偏差（网格是格点插值，函数是连续的），
+    /// 在坡上偏差能到十几厘米 —— 影子会一半陷进地里、一半浮在空中。
+    /// </summary>
+    float SurfaceY(float x, float z)
+    {
+        if (terrH == null) return HeightAt(x, z);
+        float fx = (x + terrHalf) / terrStep;
+        float fz = (z + terrHalf) / terrStep;
+        if (fx < 0f || fz < 0f || fx > terrN || fz > terrN) return HeightAt(x, z);
+        int ix = Mathf.Clamp(Mathf.FloorToInt(fx), 0, terrN - 1);
+        int iz = Mathf.Clamp(Mathf.FloorToInt(fz), 0, terrN - 1);
+        float u = fx - ix, v = fz - iz;
+        float ha = terrH[ix, iz], hb = terrH[ix + 1, iz];
+        float hc = terrH[ix + 1, iz + 1], hd = terrH[ix, iz + 1];
+        // 网格的对角线是 (x0,z0)-(x1,z1)：v<=u 在三角形 (a,b,c)，否则在 (a,c,d)
+        return v <= u
+            ? ha + (u - v) * (hb - ha) + v * (hc - ha)
+            : ha + u * (hc - ha) + (v - u) * (hd - ha);
     }
 
     void EmitGround(int n, float half, float step, float[,] h, Color[,] col, int[,] kind, int want, Material mat, string name)
@@ -615,6 +715,7 @@ public class WorldBuilder
             case "dead": Dead(p, h, s); break;
             default: RoundTree(p, h, s, Theme.Leaf1, Theme.Leaf2); break;
         }
+        AddContact(p.x, p.z, h * 0.17f, 0.4f);
     }
 
     void Peach(Vector3 p, float h, int s)
@@ -712,12 +813,15 @@ public class WorldBuilder
                 bool bloom = rng.NextDouble() < flower;
                 string file = bloom ? "tex/foliage/grass_flower.jpg" : main;
                 // 草按地形高度落位：贴着坡面长，否则外圈的草会浮在半空
-                if (!PlaceCard(file, new Vector3(x, GroundY(x, z, 0.01f), z), h, true, -8, 0f))
+                var gp = new Vector3(x, GroundY(x, z, 0.01f), z);
+                if (!PlaceCard(file, gp, h, true, -8, 0f))
                 {
                     Color c = Color.Lerp(Theme.GrassA, Theme.GrassB, (float)rng.NextDouble());
-                    kit.Tuft(new Vector3(x, GroundY(x, z, 0.01f), z), h * 0.85f, c, 5, rng.Next());
+                    kit.Tuft(gp, h * 0.85f, c, 5, rng.Next());
                     anyMesh = true;
                 }
+                // 草叶落地也要有影：没有影整片草地像浮在空中的贴纸
+                AddContact(x, z, h * 0.55f, 0.30f);
             }
         }
         kit.Sway = 0f;
@@ -761,8 +865,13 @@ public class WorldBuilder
         }
     }
 
-    bool PlaceTree(string kind, Vector3 p, float h) => PlaceCard(TreeFile(kind), p, h, false, 1, h * 0.38f);
+    // 树的接地影半径：树冠越宽影子越大，但别超过树冠本身
+    bool PlaceTree(string kind, Vector3 p, float h) => PlaceCard(TreeFile(kind), p, h, false, 1, h * 0.17f);
 
+    /// <summary>
+    /// 放一张立绘卡（树/草/芦苇）。
+    /// shadow 是接地阴影的**半径**（不是直径），0 表示不画影子。
+    /// </summary>
     bool PlaceCard(string rel, Vector3 p, float height, bool sway, int bias, float shadow)
     {
         var spr = FolioSprite(rel, height);
@@ -783,36 +892,19 @@ public class WorldBuilder
         sr.sharedMaterial = Look.CardSprite;
         sr.sortingOrder = Util.SortOrder(p.z, bias);
         cards.Add(new Card { Tr = go.transform, Phase = p.x * 1.7f + p.z * 0.8f, Sway = sway });
-        if (shadow > 0.2f)
-        {
-            var sh = new GameObject("shade");
-            sh.transform.SetParent(root, false);
-            // 阴影跟着物件的地面高度，不然物件贴坡后影子会浮在坡面上方
-            sh.transform.position = new Vector3(p.x, p.y + 0.04f, p.z);
-            sh.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
-            var srr = sh.AddComponent<SpriteRenderer>();
-            srr.sprite = Tex.CenterSprite(Tex.Shadow, shadow);
-            srr.color = new Color(0f, 0f, 0f, 0.28f);
-            srr.sortingOrder = Util.SortOrder(p.z, -24);
-        }
+        // 接地影：跟着地面高度走，不会陷进坡里
+        if (shadow > 0.2f) AddContact(p.x, p.z, shadow, 0.42f);
         return true;
     }
 
-    /// <summary>建筑贴地阴影：软黑椭圆，让房子/亭子"坐"在地上，不再像浮着的贴纸。</summary>
-    void BuildShadow(Vector3 p, float radius, float alpha)
+    /// <summary>
+    /// 建筑贴地阴影：软黑椭圆，让房子/亭子"坐"在地上，不再像浮着的贴纸。
+    /// size 是旧版精灵的世界尺寸（直径），这里换算成半径。
+    /// </summary>
+    void BuildShadow(Vector3 p, float size, float alpha)
     {
-        var sh = new GameObject("bshade");
-        sh.transform.SetParent(root, false);
-        // 建筑几何都以 p 为基准往上传，所以影子贴着 p 的地面高度放。
-        // 建筑都在内圈、地形几乎平（±4.5cm），这里用 p.y 就够了。
-        sh.transform.position = new Vector3(p.x, p.y + 0.04f, p.z);
-        sh.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
-        var sr = sh.AddComponent<SpriteRenderer>();
-        sr.sprite = Tex.CenterSprite(Tex.Shadow, radius);
-        sr.color = new Color(0f, 0f, 0f, alpha);
-        sr.sortingOrder = Util.SortOrder(p.z, -24);
+        AddContact(p.x, p.z, size * 0.5f, alpha);
     }
-
     Sprite FolioSprite(string rel, float height)
     {
         if (folioMiss.Contains(rel)) return null;
@@ -905,6 +997,8 @@ public class WorldBuilder
             kit.Blob(new Vector3(x, gy + s * 0.35f, z), new Vector3(s, s * 0.55f, s * 0.8f), c, 3, 6, 0.22f, rng.Next());
             if (Theme.SnowCaps > 0.5f)
                 kit.Blob(new Vector3(x, gy + s * 0.7f, z), new Vector3(s * 0.45f, s * 0.18f, s * 0.4f), Theme.Peak, 2, 5, 0.1f, rng.Next());
+            // 石头落地也要有影：没有影就像半截埋在土里
+            AddContact(x, z, s * 0.85f, 0.5f);
             Obstacles.Add(new Obstacle(x, z, s * 0.55f));
         }
         Emit("rocks", kit.Build("rocks", true), rockMat, true);
@@ -1088,6 +1182,7 @@ public class WorldBuilder
         if (broken)
             kit.Box(p + new Vector3(0.6f, 0.22f, 0.2f), new Vector3(0.9f, 0.35f, 0.4f), Theme.Stone, null, 40f);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.45f));
+        AddContact(p.x, p.z, 0.42f, 0.42f);
     }
 
     void Fortress()
@@ -1252,7 +1347,7 @@ public class WorldBuilder
                 float h = 1.35f + (float)rng.NextDouble() * 0.45f;
                 // 芦苇贴着河岸的地面长（河岸高度随地形变化）
                 var rp = new Vector3(x, GroundY(x, z, 0.01f), z);
-                if (!PlaceCard("tex/foliage/reed.jpg", rp, h, true, -6, 0.35f))
+                if (!PlaceCard("tex/foliage/reed.jpg", rp, h, true, -6, 0.17f))
                     ReedMesh(rp, rng.Next());
             }
         }
@@ -1281,6 +1376,7 @@ public class WorldBuilder
         kit.Roof(p + Vector3.up * 1.05f, 2.3f, 1.7f, 0.7f, Theme.RoofB, Theme.Lacquer, 0f, 0.16f);
         kit.Cylinder(p + new Vector3(0f, 0.36f, 0.85f), 0.08f, 0.05f, 0.35f, 5, Theme.Lacquer, Theme.Lacquer);
         Obstacles.Add(new Obstacle(p.x, p.z, 1.1f));
+        AddContact(p.x, p.z, 1.35f, 0.44f);
     }
 
     void Bench(Vector3 p, float yaw)
@@ -1289,6 +1385,7 @@ public class WorldBuilder
         kit.Box(p + Vector3.up * 0.42f, new Vector3(1.5f, 0.1f, 0.42f), Theme.Wood, null, yaw);
         kit.Box(p + r * new Vector3(-0.6f, 0.2f, 0f), new Vector3(0.1f, 0.4f, 0.4f), Theme.Wood, null, yaw);
         kit.Box(p + r * new Vector3(0.6f, 0.2f, 0f), new Vector3(0.1f, 0.4f, 0.4f), Theme.Wood, null, yaw);
+        AddContact(p.x, p.z, 0.85f, 0.34f);
     }
 
     void Boat(Vector3 p, float yaw)
@@ -1298,6 +1395,7 @@ public class WorldBuilder
         kit.Box(p + r * new Vector3(1.15f, 0.2f, 0f), new Vector3(0.45f, 0.16f, 0.42f), Theme.Wood, null, yaw);
         kit.Box(p + r * new Vector3(-1.15f, 0.2f, 0f), new Vector3(0.4f, 0.16f, 0.4f), Theme.Wood, null, yaw);
         kit.Cylinder(p + r * new Vector3(0.2f, 0.2f, 0f), 0.04f, 0.03f, 1.3f, 4, Theme.Wood, Theme.Wood);
+        AddContact(p.x, p.z, 1.15f, 0.36f);
     }
 
     void Pier(Vector3 p)
@@ -1306,6 +1404,7 @@ public class WorldBuilder
             kit.Box(p + new Vector3(0f, 0.12f, -i * 0.55f), new Vector3(1.3f, 0.1f, 0.48f), Theme.Wood);
         kit.Cylinder(p + new Vector3(-0.55f, 0f, -0.2f), 0.06f, 0.05f, 0.7f, 4, Theme.Wood, Theme.Wood);
         kit.Cylinder(p + new Vector3(0.55f, 0f, -1.4f), 0.06f, 0.05f, 0.7f, 4, Theme.Wood, Theme.Wood);
+        AddContact(p.x, p.z, 0.7f, 0.3f);
     }
 
     void Rack(Vector3 p, float yaw)
@@ -1315,6 +1414,7 @@ public class WorldBuilder
         kit.Cylinder(p + r * new Vector3(0.8f, 0f, 0f), 0.05f, 0.04f, 1.5f, 4, Theme.Wood, Theme.Wood);
         kit.Beam(p + r * new Vector3(-0.8f, 1.35f, 0f), p + r * new Vector3(0.8f, 1.35f, 0f), 0.06f, Theme.Wood);
         kit.Box(p + r * new Vector3(0f, 1.05f, 0f), new Vector3(0.7f, 0.45f, 0.08f), new Color(0.86f, 0.82f, 0.72f), null, yaw);
+        AddContact(p.x, p.z, 0.85f, 0.32f);
     }
 
     void Tent(Vector3 p, float yaw, Color cloth)
@@ -1330,6 +1430,7 @@ public class WorldBuilder
         kit.Cylinder(P(-1.15f, 0f, -0.85f), 0.04f, 0.03f, 1.15f, 4, Theme.Wood, Theme.Wood);
         kit.Cylinder(P(1.15f, 0f, 0.85f), 0.04f, 0.03f, 1.15f, 4, Theme.Wood, Theme.Wood);
         Obstacles.Add(new Obstacle(p.x, p.z, 1.15f));
+        AddContact(p.x, p.z, 1.7f, 0.42f);
     }
 
     void Banner(Vector3 p, Color cloth)
@@ -1338,6 +1439,7 @@ public class WorldBuilder
         kit.Box(p + new Vector3(0.55f, 2.45f, 0f), new Vector3(1.05f, 1.15f, 0.06f), cloth);
         kit.Box(p + Vector3.up * 3.15f, new Vector3(0.16f, 0.16f, 0.16f), Theme.Lacquer);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.25f));
+        AddContact(p.x, p.z, 0.32f, 0.4f);
     }
 
     void Crate(Vector3 p)
@@ -1345,6 +1447,7 @@ public class WorldBuilder
         kit.Box(p + Vector3.up * 0.32f, new Vector3(0.7f, 0.64f, 0.55f), Theme.Wood, Theme.Path);
         kit.Box(p + new Vector3(0.45f, 0.22f, 0.4f), new Vector3(0.5f, 0.4f, 0.4f), Theme.Wood);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.45f));
+        AddContact(p.x, p.z, 0.62f, 0.42f);
     }
 
     void Cart(Vector3 p, float yaw, bool broken)
@@ -1357,6 +1460,7 @@ public class WorldBuilder
         if (broken)
             kit.Box(p + r * new Vector3(1.3f, 0.2f, 0.4f), new Vector3(0.7f, 0.18f, 0.45f), Theme.Wood, null, yaw + 50f);
         Obstacles.Add(new Obstacle(p.x, p.z, 1.05f));
+        AddContact(p.x, p.z, 1.25f, 0.4f);
     }
 
     void Stele(Vector3 p)
@@ -1364,6 +1468,7 @@ public class WorldBuilder
         kit.Box(p + Vector3.up * 0.15f, new Vector3(1.1f, 0.3f, 0.7f), Theme.Stone);
         kit.Box(p + Vector3.up * 1.15f, new Vector3(0.7f, 1.7f, 0.28f), Theme.Stone, Theme.Peak);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.55f));
+        AddContact(p.x, p.z, 0.62f, 0.44f);
     }
 
     void Scorch(Vector3 p, float rx, float rz)
@@ -1383,12 +1488,14 @@ public class WorldBuilder
         kit.Beam(p + r * new Vector3(-0.7f, 0.15f, 0f), p + r * new Vector3(0.7f, 0.85f, 0f), 0.1f, Theme.Trunk);
         kit.Beam(p + r * new Vector3(-0.7f, 0.85f, 0.15f), p + r * new Vector3(0.7f, 0.15f, 0.15f), 0.1f, Theme.Trunk);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.7f));
+        AddContact(p.x, p.z, 0.8f, 0.36f);
     }
 
     void Torch(Vector3 p)
     {
         kit.Cylinder(p, 0.06f, 0.05f, 1.35f, 5, Theme.Wood, Theme.Wood);
         kit.Box(p + Vector3.up * 1.45f, new Vector3(0.22f, 0.28f, 0.22f), new Color(1f, 0.62f, 0.28f));
+        AddContact(p.x, p.z, 0.24f, 0.34f);
         if (fires < 2) FireLight(p + Vector3.up * 1.5f);
     }
 
@@ -1399,6 +1506,7 @@ public class WorldBuilder
         kit.Beam(p + new Vector3(0.2f, 0.1f, -0.1f), p + new Vector3(-0.1f, 0.36f, 0.12f), 0.07f, Theme.Trunk);
         kit.Blob(p + Vector3.up * 0.48f, new Vector3(0.26f, 0.34f, 0.26f), new Color(1f, 0.46f, 0.16f), 2, 5, 0.08f, seed);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.5f));
+        AddContact(p.x, p.z, 0.6f, 0.4f);
         if (fires < 2) FireLight(p + Vector3.up * 0.6f);
     }
 
@@ -1421,6 +1529,7 @@ public class WorldBuilder
         kit.Blob(p + Vector3.up * (0.45f * sc), new Vector3(0.7f * sc, 0.45f * sc, 0.55f * sc), Theme.GrassDry, 3, 6, 0.08f, seed);
         kit.Blob(p + Vector3.up * (0.85f * sc), new Vector3(0.45f * sc, 0.32f * sc, 0.4f * sc), Theme.Leaf2, 2, 5, 0.06f, seed + 1);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.45f * sc));
+        AddContact(p.x, p.z, 0.72f * sc, 0.4f);
     }
 
     void Scarecrow(Vector3 p)
@@ -1429,6 +1538,7 @@ public class WorldBuilder
         kit.Beam(p + new Vector3(-0.45f, 1.25f, 0f), p + new Vector3(0.45f, 1.25f, 0f), 0.06f, Theme.Wood);
         kit.Blob(p + Vector3.up * 1.75f, new Vector3(0.18f, 0.2f, 0.16f), Theme.Path, 2, 5, 0.05f, seed);
         kit.Box(p + Vector3.up * 1.2f, new Vector3(0.55f, 0.45f, 0.12f), Theme.RoofB);
+        AddContact(p.x, p.z, 0.42f, 0.34f);
     }
 
     void Woodpile(Vector3 p)
@@ -1437,6 +1547,7 @@ public class WorldBuilder
         kit.Beam(p + new Vector3(-0.3f, 0.28f, -0.1f), p + new Vector3(0.45f, 0.32f, 0.05f), 0.12f, Theme.Trunk);
         kit.Beam(p + new Vector3(-0.35f, 0.42f, 0.05f), p + new Vector3(0.3f, 0.48f, -0.05f), 0.11f, Theme.Wood);
         Obstacles.Add(new Obstacle(p.x, p.z, 0.5f));
+        AddContact(p.x, p.z, 0.6f, 0.4f);
     }
 
     void Millet(Vector3 p)
@@ -1446,6 +1557,7 @@ public class WorldBuilder
             float x = p.x + (i - 1.5f) * 0.7f;
             if (!Open(x, p.z, 0.5f)) continue;
             kit.Box(new Vector3(x, 0.45f, p.z), new Vector3(0.35f, 0.9f, 2.4f), Theme.GrassDry, Theme.Leaf2);
+            AddContact(x, p.z, 0.45f, 0.34f);
         }
     }
 
@@ -1472,6 +1584,7 @@ public class WorldBuilder
     void FencePost(Vector3 p)
     {
         kit.Cylinder(p, 0.07f, 0.06f, 0.85f, 5, Theme.Wood, Theme.Wood);
+        AddContact(p.x, p.z, 0.18f, 0.3f);
     }
 
     // ---------------- 氛围粒子 ----------------
