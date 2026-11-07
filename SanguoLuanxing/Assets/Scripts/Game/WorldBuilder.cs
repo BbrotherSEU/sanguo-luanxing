@@ -96,6 +96,7 @@ public class WorldBuilder
         Lights();
         Sky();
         Terrain();
+        Backdrop();
         PathRibbon();
         if (HasWater()) River();
         Rocks();
@@ -190,8 +191,10 @@ public class WorldBuilder
     void ApplyFogDistance()
     {
         float vd = Settings.Current != null ? Settings.Current.ViewDistance : 1f;
-        RenderSettings.fogStartDistance = (wide ? 52f : Theme.FogStart) * vd;
-        RenderSettings.fogEndDistance = (wide ? 128f : Theme.FogEnd) * vd;
+        // 雾起点要压在远景剪影之前，剪影才会被雾吃掉 ——
+        // 否则山脊会以一条硬边浮在雾前面，层次全反了。
+        RenderSettings.fogStartDistance = (wide ? 30f : Theme.FogStart) * vd;
+        RenderSettings.fogEndDistance = (wide ? 118f : Theme.FogEnd) * vd;
         if (shadowMat != null)
         {
             shadowMat.SetFloat("_FogStart", RenderSettings.fogStartDistance);
@@ -427,6 +430,55 @@ public class WorldBuilder
         kit.KeepAlpha = false;
         var mesh = kit.Build("contact", false, false);
         Emit("contact", mesh, shadowMat, false);
+    }
+
+    /// <summary>
+    /// 远景剪影层：在地图边缘外圈立一圈低模山脊。
+    /// 原来场景到 fogEnd 就直接被雾切断，边上什么都没有，
+    /// 看着像一张被裁掉的画而不是一片天地。
+    /// 剪影用 Unlit（顶点色不受光），并让它完全受雾：
+    /// 远处山脊自然融进雾里，只在天际线上留一道轮廓 —— 构出三层景深
+    /// （近景实体 / 中景道具 / 远景剪影）。
+    /// </summary>
+    void Backdrop()
+    {
+        kit.Clear();
+        var rng = new System.Random(seed ^ 0x5eed);
+        float baseR = mapHalf + 6f;
+        // 两圈：近的一圈稍高、颜色稍实，远的一圈更高更淡
+        for (int ring = 0; ring < 2; ring++)
+        {
+            float r = baseR + ring * 11f;
+            float h0 = 5.5f + ring * 4.5f;
+            int seg = 44;
+            // 顶点色：以地平线色为基准往深里压 —— 剪影要能"沉进"地平线，
+            // 而不是浮在地平线上方当一条硬边。
+            Color horizon = SkyCol(0f);
+            Color c = Color.Lerp(Theme.Cliff, horizon, 0.45f + ring * 0.20f);
+            c = Color.Lerp(c, horizon, 0.15f + ring * 0.10f);
+            Vector3 prev = Vector3.zero;
+            for (int i = 0; i <= seg; i++)
+            {
+                float a = i * Mathf.PI * 2f / seg;
+                // 高度按低频起伏：山脊要连绵，不能是一圈锯齿
+                float hh = h0 * (0.62f + 0.5f * (0.5f + 0.5f * Mathf.Sin(a * 3f + ring * 2.1f + seed * 0.01f)))
+                           * (0.78f + 0.44f * (float)rng.NextDouble());
+                Vector3 p = new Vector3(Mathf.Cos(a) * r, hh, Mathf.Sin(a) * r);
+                if (i > 0)
+                {
+                    // 底边埋到地形以下，山脚不会露出悬空的缝
+                    Vector3 b0 = new Vector3(prev.x, -6f, prev.z);
+                    Vector3 b1 = new Vector3(p.x, -6f, p.z);
+                    // 顶点顺序 a-b-d-e：上边两个、下边两个
+                    // inside 指向圆心，法线朝内（和天空穹顶一致）
+                    kit.QuadColors(prev, p, b1, b0, c, c, c, c, new Vector3(0f, 40f, 0f));
+                }
+                prev = p;
+            }
+        }
+        var mesh = kit.Build("backdrop", false);
+        // FogMix = 1：剪影要完全吃雾，否则会在雾前面浮成一条硬边
+        Emit("backdrop", mesh, Look.NewUnlit(1f), false);
     }
 
     void Terrain()
