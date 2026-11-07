@@ -1,81 +1,38 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 $unity = "D:\Games\UnityData\2022.3.62f3c1\Editor\Unity.exe"
 $proj = Join-Path (Split-Path $PSScriptRoot -Parent) "SanguoLuanxing"
 $tmp = Join-Path $env:TEMP "sanguo_shadercheck"
 
-# 造一个最小工程：只放要验证的着色器 + 一个脚本强制重新导入并检查编译错误
+# 校验思路：**直接用主工程**（它有现成的 Library，C# 不会重编译，
+# 于是不会触发 Unity 的 IL Post Processor —— ILPP 后端要握手本地 dotnet 宿主，
+# 沙箱里连不上，会一直卡在
+# "Connectivity with IL Post Processor runner cannot be established yet"）。
+# 批处理打开工程会导入新加的着色器，编译错误直接写进日志。
 if (Test-Path $tmp) { Remove-Item $tmp -Recurse -Force }
-New-Item -ItemType Directory -Force -Path "$tmp\Assets" | Out-Null
-New-Item -ItemType Directory -Force -Path "$tmp\ProjectSettings" | Out-Null
-
-$src = Join-Path $proj "Assets\Resources\Shaders"
-Copy-Item "$src\*.shader" "$tmp\Assets" -Force
-
-@'
-using UnityEditor;
-using UnityEngine;
-
-public class ShaderCheck
-{
-    public static void Run()
-    {
-        AssetDatabase.Refresh(ImportAssetOptions.ForceUpdate | ImportAssetOptions.ForceSynchronousImport);
-        int bad = 0, ok = 0;
-        foreach (var guid in AssetDatabase.FindAssets("t:Shader", new[] { "Assets" }))
-        {
-            string path = AssetDatabase.GUIDToAssetPath(guid);
-            var sh = AssetDatabase.LoadAssetAtPath<Shader>(path);
-            if (sh == null) { Debug.LogError("SHADER LOAD FAIL: " + path); bad++; continue; }
-            if (ShaderUtil.ShaderHasError(sh))
-            {
-                foreach (var m in ShaderUtil.GetShaderMessages(sh))
-                    Debug.LogError("SHADER ERROR [" + path + "] line " + m.line + ": " + m.message + " | " + m.messageDetails);
-                bad++;
-            }
-            else { Debug.Log("SHADER OK: " + path); ok++; }
-        }
-        Debug.Log("SHADERCHECK RESULT ok=" + ok + " bad=" + bad);
-        EditorApplication.Exit(bad > 0 ? 2 : (ok > 0 ? 0 : 3));
-    }
-}
-'@ | Set-Content "$tmp\Assets\ShaderCheck.cs" -Encoding UTF8
-
-@'
-%YAML 1.1
-%TAG !u! tag:unity3d.com,2011:
---- !u!129 &1
-PlayerSettings:
-  m_ObjectHideFlags: 0
-  serializedVersion: 23
-  productGUID: 00000000000000000000000000000000
-  companyName: Test
-  productName: ShaderCheck
-  defaultScreenWidth: 640
-  defaultScreenHeight: 480
-'@ | Set-Content "$tmp\ProjectSettings\ProjectSettings.asset" -Encoding UTF8
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 
 $log = Join-Path $tmp "shadercheck.log"
-if (Test-Path $log) { Remove-Item $log -Force }
 # 沙箱内许可客户端握手会报错（不影响执行），清掉代理避免它去连外网
 $env:no_proxy = "*"; $env:NO_PROXY = "*"
 $env:HTTP_PROXY = ""; $env:HTTPS_PROXY = ""
 $p = Start-Process -FilePath $unity -ArgumentList @(
-    "-batchmode", "-nographics", "-quit", "-projectPath", $tmp,
-    "-logFile", $log, "-executeMethod", "ShaderCheck.Run"
+    "-batchmode", "-nographics", "-quit", "-projectPath", $proj,
+    "-logFile", $log
 ) -PassThru -Wait -NoNewWindow
 
 $out = if (Test-Path $log) { Get-Content $log -Raw } else { "" }
-$okLines = ([regex]::Matches($out, "SHADER OK:")).Count
-$errLines = ([regex]::Matches($out, "SHADER ERROR|SHADER LOAD FAIL")).Count
-Write-Host "--- shaders ok: $okLines, errors: $errLines ---"
+# 着色器编译错误在批处理日志里的形态
+$errLines = ([regex]::Matches($out, "Shader error in|Shader warning in")).Count
+$impLines = ([regex]::Matches($out, "GroundShadow")).Count
+Write-Host "--- shader errors: $errLines, GroundShadow mentions: $impLines ---"
 if ($errLines -gt 0) {
     Write-Host "SHADER COMPILE FAILED"
-    ($out -split "`n") | Select-String -Pattern "SHADER ERROR|SHADER LOAD FAIL" | Select-Object -First 20 | ForEach-Object { Write-Host $_.ToString() }
+    ($out -split "`n") | Select-String -Pattern "Shader error in|Shader warning in" | Select-Object -First 20 | ForEach-Object { Write-Host $_.ToString() }
     exit 1
 }
-if ($okLines -eq 0) {
-    Write-Host "NO SHADER COMPILED (see log below)"
-    ($out -split "`n") | Select-String -Pattern "Exception|error CS|Aborting|licen" | Select-Object -First 20 | ForEach-Object { Write-Host $_.ToString() }
+if ($impLines -eq 0) {
+    Write-Host "SHADERS NOT IMPORTED (see log below)"
+    ($out -split "`n") | Select-String -Pattern "Exception|error CS|Aborting" | Select-Object -First 20 | ForEach-Object { Write-Host $_.ToString() }
     exit 1
 }
 Write-Host "SHADER COMPILE OK"

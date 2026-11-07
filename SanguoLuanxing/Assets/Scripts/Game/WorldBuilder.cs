@@ -833,7 +833,7 @@ public class WorldBuilder
                     anyMesh = true;
                 }
                 // 草叶落地也要有影：没有影整片草地像浮在空中的贴纸
-                AddContact(x, z, h * 0.55f, 0.30f);
+                AddContact(x, z, h * 0.28f, 0.26f);
             }
         }
         kit.Sway = 0f;
@@ -905,7 +905,7 @@ public class WorldBuilder
         sr.sortingOrder = Util.SortOrder(p.z, bias);
         cards.Add(new Card { Tr = go.transform, Phase = p.x * 1.7f + p.z * 0.8f, Sway = sway });
         // 接地影：跟着地面高度走，不会陷进坡里
-        if (shadow > 0.2f) AddContact(p.x, p.z, shadow, 0.42f);
+        if (shadow > 0.05f) AddContact(p.x, p.z, shadow, 0.42f);
         return true;
     }
 
